@@ -1,0 +1,43 @@
+{
+  "manifest_version": 3,
+  "name": "Persitent Containers",
+  "version": "1.0",
+  "author": "navchandar",
+  "description": "Makes new tabs inherit the container of the currently active tab, just like Chromium browsers",
+  "permissions": ["tabs", "cookies", "storage", "contextualIdentities"],
+  "action": {
+    "default_icon": {
+      "16": "icons/icon.svg",
+      "32": "icons/icon.svg"
+    },
+    "default_title": "Persistent Containers Settings",
+    "default_popup": "popup.html"
+  },
+  "icons": {
+    "16": "icons/icon.svg",
+    "32": "icons/icon.svg",
+    "48": "icons/icon.svg",
+    "128": "icons/icon.svg"
+  },
+  "background": {
+    "scripts": ["background.js"],
+    "type": "module"
+  },
+  "commands": {
+    "open-new-tab-without-container": {
+      "suggested_key": {
+        "default": "Alt+T"
+      },
+      "description": "Open a new tab in No Container"
+    }
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "persistent-containers-mv3@navchandar.github.io",
+      "strict_min_version": "109.0",
+      "data_collection_permissions": {
+        "required": ["none"]
+      }
+    }
+  }
+}
