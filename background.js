@@ -219,7 +219,7 @@ browser.tabs.onCreated.addListener(async (newTab) => {
         );
       }
       // Scenario B: The tab is completely blank. Add to tracker and wait for the browser event.
-      else if (newTab.url === "about:blank" || newTab.url === "") {
+      else if (!newTab.url || newTab.url === "about:blank") {
         pendingBlankTabs.set(newTab.id, {
           targetContainerId,
           activeTabId: currentActiveTab.id,
@@ -265,26 +265,14 @@ browser.tabs.onUpdated.addListener(
         // parent tab was closed, abort
         return;
       }
-      // Check if MAC has a rule — if so, let MAC handle it entirely
-      const macAssignment = await getMACAssignment(changeInfo.url);
-      if (
-        macAssignment?.cookieStoreId &&
-        macAssignment.cookieStoreId !== data.targetContainerId
-      ) {
-        // MAC will handle the re-open into its own container.
-        // We still need to do our swap, but use MAC's container.
-        await performSwap(
-          tab,
-          macAssignment.cookieStoreId,
-          freshActiveTab,
-          changeInfo.url,
-        );
+      const freshTab = await browser.tabs.get(tabId).catch(() => null);
+      if (!freshTab) {
         return;
       }
-
-      // else swap the tab based on current tab container
+      // swap the tab based on current tab container
+      // MAC check happens inside performSwap
       await performSwap(
-        tab,
+        freshTab,
         data.targetContainerId,
         freshActiveTab,
         changeInfo.url,
