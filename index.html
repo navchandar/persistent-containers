@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <title>Persistent Containers | Firefox Extension</title>
+    <meta
+      name="description"
+      content="Firefox extension to make containers persistent and sticky. New tabs and bookmarks inherit the container of the currently active tab, mimicking Chrome's behavior."
+    />
+    <meta
+      name="keywords"
+      content="Firefox extension, Multi-Account Containers, sticky containers, persistent tabs, browser productivity"
+    />
+    <meta name="author" content="Naveenchandar" />
+
+    <meta property="og:title" content="Persistent Containers for Firefox" />
+    <meta
+      property="og:description"
+      content="Make Firefox containers persistent and sticky. Automatically route new tabs and bookmarks into your active container."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="icons/icon.svg" />
+
+    <link rel="icon" type="image/svg+xml" href="icons/icon.svg" />
+
+    <style>
+      :root {
+        /* Light Theme Variables */
+        --bg-color: #f9fafb;
+        --text-main: #111827;
+        --text-muted: #4b5563;
+        --card-bg: #ffffff;
+        --primary-color: #37adff;
+        --primary-hover: #218fe1;
+        --border-color: #e5e7eb;
+        --code-bg: #f3f4f6;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          /* Dark Theme Variables */
+          --bg-color: #111827;
+          --text-main: #f9fafb;
+          --text-muted: #9ca3af;
+          --card-bg: #1f2937;
+          --border-color: #374151;
+          --code-bg: #374151;
+        }
+      }
+
+      /* Base Styles */
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        transition:
+          background-color 0.3s ease,
+          color 0.3s ease;
+        background-color: var(--bg-color);
+        color: var(--text-main);
+        line-height: 1.6;
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
+          Arial, sans-serif;
+      }
+
+      /* Layout Container */
+      .container {
+        margin: 0 auto;
+        padding: 2rem 1.5rem;
+        max-width: 800px;
+      }
+
+      /* Header & Hero Section */
+      header {
+        margin-bottom: 3rem;
+        border-bottom: 1px solid var(--border-color);
+        padding: 3rem 0;
+        text-align: center;
+      }
+
+      .logo {
+        margin-bottom: 1rem;
+        width: 96px;
+        height: 96px;
+      }
+
+      h1 {
+        margin-bottom: 1rem;
+        font-weight: 800;
+        font-size: 2.5rem;
+        letter-spacing: -0.025em;
+      }
+
+      .subtitle {
+        margin: 0 auto 2rem auto;
+        max-width: 600px;
+        color: var(--text-muted);
+        font-size: 1.25rem;
+      }
+
+      /* Buttons */
+      .btn-group {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 1rem;
+      }
+
+      .btn {
+        display: inline-block;
+        transition: all 0.2s ease;
+        border-radius: 0.5rem;
+        padding: 0.75rem 1.5rem;
+        font-weight: 600;
+        text-decoration: none;
+      }
+
+      .btn-primary {
+        border: 2px solid var(--primary-color);
+        background-color: var(--primary-color);
+        color: #ffffff;
+      }
+
+      .btn-primary:hover {
+        border-color: var(--primary-hover);
+        background-color: var(--primary-hover);
+      }
+
+      .btn-secondary {
+        border: 2px solid var(--border-color);
+        background-color: transparent;
+        color: var(--text-main);
+      }
+
+      .btn-secondary:hover {
+        border-color: var(--text-muted);
+      }
+
+      /* Content Sections */
+      section {
+        margin-bottom: 3rem;
+      }
+
+      h2 {
+        margin-bottom: 1rem;
+        border-bottom: 2px solid var(--border-color);
+        padding-bottom: 0.5rem;
+        font-weight: 700;
+        font-size: 1.75rem;
+      }
+
+      h3 {
+        margin: 1.5rem 0 0.75rem 0;
+        font-size: 1.25rem;
+      }
+
+      p {
+        margin-bottom: 1rem;
+        color: var(--text-muted);
+      }
+
+      /* Lists */
+      ul,
+      ol {
+        margin-bottom: 1.5rem;
+        padding-left: 1.5rem;
+        color: var(--text-muted);
+      }
+
+      li {
+        margin-bottom: 0.5rem;
+      }
+
+      /* Inline Code and Blocks */
+      code {
+        border-radius: 0.25rem;
+        background-color: var(--code-bg);
+        padding: 0.2rem 0.4rem;
+        color: var(--text-main);
+        font-size: 0.9em;
+        font-family:
+          ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      }
+
+      /* Cards / Highlights */
+      .card {
+        margin-bottom: 1rem;
+        border: 1px solid var(--border-color);
+        border-radius: 0.75rem;
+        background-color: var(--card-bg);
+        padding: 1.5rem;
+      }
+
+      /* Footer */
+      footer {
+        margin-top: 3rem;
+        border-top: 1px solid var(--border-color);
+        padding: 2rem 0;
+        color: var(--text-muted);
+        font-size: 0.875rem;
+        text-align: center;
+      }
+
+      footer a {
+        color: var(--primary-color);
+        text-decoration: none;
+      }
+
+      footer a:hover {
+        text-decoration: underline;
+      }
+
+      /* Mobile Responsiveness */
+      @media (max-width: 600px) {
+        h1 {
+          font-size: 2rem;
+        }
+        .subtitle {
+          font-size: 1.1rem;
+        }
+        .btn-group {
+          flex-direction: column;
+        }
+        .btn {
+          width: 100%;
+          text-align: center;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="container">
+      <!-- Hero Section -->
+      <header>
+        <img
+          src="icons/icon.svg"
+          alt="Persistent Containers Logo"
+          class="logo"
+        />
+        <h1>Persistent Containers</h1>
+        <p class="subtitle">
+          Firefox extension to make containers persistent and sticky. New tabs
+          inherit the container of the currently active tab.
+        </p>
+        <div class="btn-group">
+          <a
+            href="https://addons.mozilla.org/en-US/firefox/addon/persitent-containers/"
+            class="btn btn-primary"
+            >Add to Firefox</a
+          >
+          <a
+            href="https://github.com/navchandar/persistent-containers/"
+            class="btn btn-secondary"
+            >View on GitHub</a
+          >
+        </div>
+      </header>
+
+      <!-- Overview Section -->
+      <section id="overview">
+        <h2>Overview</h2>
+        <p>
+          By default, Firefox opens all new tabs and bookmarks in the "No
+          Container" state, requiring users to manually sort tabs into their
+          respective containers.
+          <strong>Persistent Containers</strong> intercepts the creation of new
+          tabs and automatically routes them into the same container as the
+          currently active tab, mimicking the default behavior in Google Chrome
+          browser.
+        </p>
+      </section>
+
+      <!-- Features Section -->
+      <section id="features">
+        <h2>Features</h2>
+        <div class="card">
+          <ul>
+            <li>
+              When opening bookmarks and external links, intercepts the new tab
+              into the current tab's container automatically.
+            </li>
+            <li>
+              Opens new tabs/bookmarks right next to the current tab by default,
+              maintaining your workflow context.
+            </li>
+            <li>
+              Includes toolbar options to toggle whether new tabs open
+              immediately next to the current tab or at the end of the tab row.
+            </li>
+            <li>
+              Use <code>Alt+T</code> to forcefully open a standard "No
+              Container" tab, bypassing the extension's rules.
+            </li>
+            <li>
+              Safely ignores Private Browsing windows, session restores, and new
+              window creations to prevent browser conflicts and memory leaks.
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- Usage Section -->
+      <section id="usage">
+        <h2>Usage</h2>
+        <p>
+          Once installed, the extension operates silently in the background. You
+          can control its behavior using the following methods:
+        </p>
+        <ul>
+          <li>
+            <strong>Toolbar Menu:</strong> Click the Persistent Containers icon
+            in your Firefox toolbar to access the settings menu. Here you can
+            toggle the "Open next to current tab" preference.
+          </li>
+          <li>
+            <strong>Keyboard Commands:</strong>
+            <ul>
+              <li>
+                <code>Ctrl+T</code>: Open a new tab in the current container.
+              </li>
+              <li>
+                <code>Alt+T</code>: Open a new tab without a container. (Note:
+                This shortcut can be customized in Firefox's Add-on settings).
+              </li>
+            </ul>
+          </li>
+        </ul>
+      </section>
+
+      <!-- Permissions Section -->
+      <section id="permissions">
+        <h2>Permissions Used</h2>
+        <p>
+          This extension requires minimal permissions to function efficiently,
+          keeping your data strictly local.
+        </p>
+        <ul>
+          <li>
+            <code>tabs</code>: To monitor tab creation and manage tab URLs
+            during routing.
+          </li>
+          <li>
+            <code>contextualIdentities</code>: To read and assign container IDs
+            (cookieStoreId) to new tabs.
+          </li>
+          <li>
+            <code>cookies</code>: Required by Firefox's security model to
+            programmatically create tabs inside isolated containers.
+          </li>
+          <li>
+            <code>storage</code>: To save your settings and preferences locally
+            in the browser memory.
+          </li>
+        </ul>
+      </section>
+
+      <section id="authors">
+        <h3 style="display: block">Authors</h3>
+        <a
+          href="https://github.com/navchandar/persistent-containers/graphs/contributors"
+          target="_blank"
+        >
+          <img
+            src="https://contrib.rocks/image?repo=navchandar/persistent-containers"
+            style="height: auto"
+            alt="Contributors"
+          />
+        </a>
+        <br />
+        <h3 style="display: inline-block">License:</h3>
+        <a
+          href="https://github.com/navchandar/persistent-containers/blob/main/LICENSE"
+          target="_blank"
+          >OSI Approved - MIT License</a
+        >
+        <br />
+        <h3 style="display: inline-block">Contact:</h3>
+        <span
+          ><a
+            href="https://github.com/navchandar/persistent-containers/issues"
+            target="_blank"
+            >For Feedback / Issues / Bugs</a
+          ></span
+        >
+        <br />
+      </section>
+
+      <section id="maintainer">
+        <h3 style="display: inline-block">Maintained By</h3>
+        <a style="display: inline-block" href="https://navchandar.github.io/"
+          >Naveenchandar</a
+        >
+      </section>
+
+      <!-- Footer -->
+      <footer>
+        <h3>Support This Project</h3>
+        <a href="https://paypal.me/navchandar/" target="_blank">
+          <img
+            src="https://img.shields.io/badge/-Paypal-0070ba?style=for-the-badge&logo=data%3Aimage%2Fjpeg%3Bbase64%2C%2F9j%2F4AAQSkZJRgABAQAAAQABAAD%2F2wBDAAIBAQIBAQICAgICAgICAwUDAwMDAwYEBAMFBwYHBwcGBwcICQsJCAgKCAcHCg0KCgsMDAwMBwkODw0MDgsMDAz%2F2wBDAQICAgMDAwYDAwYMCAcIDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAz%2FwgARCAAwADADAREAAhEBAxEB%2F8QAHQAAAgIBBQAAAAAAAAAAAAAABwgGCQIAAwQFCv%2FEABwBAAEEAwEAAAAAAAAAAAAAAAYCAwcIAAEFBP%2FaAAwDAQACEAMQAAAAdZSiYpqCdXycvSppyvSMUbKuLEBqPeeyxsX4su2oRUX2QQweZr0j8qBdJUyhfS8vqPk%2FEV3tVbWaafq4naOlKlyuxybCnaAD9sq5XBxxSVysGLjOdMLWa4WvNYLKIfSoU5sq7yAEYZOOCWb7LwozP%2F%2FEAD0QAAAFAwMBBAQJDQAAAAAAAAECAwQFBgcIABESCSExUbUKd5bTExQXIiM4cYGyMjM3QUJHV2GCg5Oh0f%2FaAAgBAQABPwDA%2FBOyVX4SWdlpaztqZKVlKHhHTx68pJg4cO11GCBzqqHMkJjnMYRMYwiOpvA%2FHWnYpZ49srZts2aJmUWWNRkcBCFKG5hH6HuAA30NqsOAP2W%2FsH7IR%2FuNQdjsQaheC1aW3sO4WN3FJSEf7jTXp94%2BuEiGJZGzqhD9oGCjY7tAf7Os7MFLJ0dhFeSWibNWqi5SLoabeNHbOk2CLhmsmwXOmomoVIDEOUxQMBiiA66eX1ArGer%2BA8tQ11vLjrUB0%2Fat%2BKujs3z8SNkxIqKahimHifYQ7e42lq4lEC8jzEmUviLs%2FwD3Ta6Mk0U5pT0omYP2ivVCj%2BLXo4eXVUVjcyq6Cm6gfTER8QTeMwevTKmanKYxRKnyEfyuW466gwGHAC%2BX0n7v5%2Fy1xrp5ciYBWOKHYBbfQHlzfXpM9x14K0Nu4NAwcJp0%2BFwX%2BSZUBLqpltkiE8e3RC8zCBS8x8ADfXSKoCoLP3IYVYJVmK8m7aJtC8vzqQn3NyAB%2FwBDrqF%2FUAvoXwt9PeWrjrp8Bw6fdkDeNvYDy5vr0mWuzvr80NT3MTN2EWq7%2FqUMBR%2FBrFzGSlbuW6WlqgZKulwcCinxUMQOIfZq32CNKtDg8h6QcvBKOxVNlVQ3%2B4dtYOYMzU5WEZUEwzJHQ0SsksVuqUyainEdwKBdg27tdQr5mAV9fV9P%2BWuddPMAPgFY3l%2FD%2BB8uQ11P%2Bjlc7N%2FIY9VRFQQDWNSQM3bJuhUE5CchEAHYNU3jdIYsMho2SdM3r9qqZRRRrv8ABmEw7bBv9msE6EYw2MdLqHj2qbtymdZUTIFBQxvhTB2jtv3AGg7zcdvm9gB%2BouuoaQwYB3z9X0%2F5c41g5nRY%2BlMG7NRMteW1cXLRVEQjV4ydVbHoOGixGCJTpqEOqBiHIYBKJTAGidQ%2BwJQMX5cbPe2kb77U3d%2FDmpZo0k%2BuDYV2%2BOO5llawj%2BRjfcvqDz0x0gYdFmxvVZtq1alEqSZKyjgAgf5tE6h1gOH6c7P%2B2cb77Wc2dllKtwfvHExd5LVyspK0PNs2bJnVrBZw7WUYLkTTTTKqJjnMbYoFKA6%2F%2F8QAJREAAQMDAgYDAAAAAAAAAAAAAQACAwQRBQYSISJRBzEQFUET%2F9oACAEDAQE%2FAG%2BrIyCPmUa%2BDtMxCDtMlAFmFWYNym%2Fqx%2BoMVEXD2mTTu9FXqO1lzEJGnROVZhGoot2t0s4TD%2BTG9qhYAdSufZNlmjNx%2B3pqWgfyaTdUz7Qt%2FTYIbut2s3uvI1vSztnWuwiqFPRuspM2ZoxFuhriWnoLxp41r6itbiNe06RvuomiOPirtJ4hYzgdTUPL2ryPSzfdSQyb2svFGERQZchbJGNe97hMY1gs0W%2BOWi9lyMe6rcg4LUzCpliu8%2ByqSmjp4RFELAfP%2F9k%3D&logoColor=white&link=https://paypal.me/navchandar//"
+            alt="Paypal Badge"
+          />
+        </a>
+        <a href="https://www.buymeacoffee.com/navchandar/" target="_blank">
+          <img
+            src="https://img.shields.io/badge/-Buy%20a%20Coffee-ff813f?style=for-the-badge&logo=data%3Aimage%2Fpng%3Bbase64%2CiVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAIAAADYYG7QAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAAEnQAABJ0Ad5mH3gAAAP5SURBVFhH7ZdrTFNnGMfftvSUXmTcBtNCWy6mXBRoAZWL1GAgIRnSiGOZkmF0W3YpJEYXtIm3qPEWP%2BgHRRogQLgmEmPiEpOZGBSX%2BAUZLES3%2Bc0PRiMJX5a5ubPnlCMxT9tznrcDYxae%2FD6c0vP%2Bn185p%2B95ysTjnveKFSE1VoTU%2BF8Ina3NIjL4ST5aqwq30K3PCxzpViLVztVouSrcQk1FaSK59Hr93b0ulKAMn9Bs6wboIXcjVGlJcYt7DQpRhiRUk5UAVGfEGwTw4a7sZPNCQkNOMkoOhSQUo9OWlZXV%2FIdqbm622WwNeakoORSqUFdXl3wZoq3GxsalFBIEvdEYC5gAkxEwA2bTIpa3juGthXOAhVWAwSAsmdD%2B8rRUi%2FChWV%2FsENz5zJXHioBcVpjLCnJYgZOtfwO8LARypXfhHDjZ7WDF6UyjYVszEyAHJYdCEgJ2FaRAonh6o%2Fg74yPAnhxhULd3F6LMsFCFTlQ7rHEG6fhRSEsFppl4kf3wtST09EDZ24GRoApNf1cCoT996RJvWXBXBX6UhL4qZ5vSLSgwElShv45WgVCP1yneiMddFbgmCXmyNLtdH6HASFCFAGeyqb0yXey14a4KjEhCKas0Z2oyUVokOIRgn5W2Wq77OsCen5JuoOufUR%2F7JKHLH6%2B1J1kSLUZTrAEO7FaBSrKwOkGAsiaY7fGxKDYsJKHxPUXwKdva2k5EWy6Xy5OdgmLDQhKaO1QBQqOjo%2FJTgL%2Fchet9G60oNizUe2ibM8nr9crxnDUzMwOfZ%2BIL0mBEFfJX2bIz7HIHzhoaGgKheX8lygwLVWhoR64UOj8vN%2BEpv9%2BfnRqPAiNBFZoJ7tQTExNyE56qr6%2F35i%2FDxijE6Do6OuQmPJVhSzvssaO0SHAIua0f%2BHw%2BuQm55ubmpG9oUx5KiwSHUEtRqmdzpdyHXOPj4yA021qK0iLBIQS%2FyCC6s7MTNqTh4eGBgYG%2Bvr6enh6YbuGPcDUDgUB3d3dvb29%2Ff%2F%2Fg4ODIyMjY2FhdXd0GexKKUoBDCAYaEEKl1Wr0MRqDQWuM1QmCVqfTwHCIao%2BbekcDHELAy4MV%2FdtzwOzPB9q%2FH7N%2Ffgt5mgZ5%2FSt7dZ%2F9cYElGnWwy79oL0c5CvAJAb%2F4SqU9V3VMC45m5bZVaLkq3EKvj1V1NRDGtOBoxnWxFuAWAr6vIIxpwdHsXC11LlskGqF6Z5L6mBZgz06yGzvXobWqRCMEX5xXR6rESS2WWGRS%2Bvdc%2FTSqcPSaAgj9%2FG2JeE%2FAHovckYT2bXmHQudrM6eumKZusvBcYlPtrDLzXQmlxRmk%2FY5QaCGFaNY8%2FKaYCFpIIRqhZWVFSI0VIWWOe%2F4FR6A6eCoawHAAAAAASUVORK5CYII%3D&logoColor=white&link=https://www.buymeacoffee.com/navchandar//"
+            alt="BuymeCoffee Badge"
+          />
+        </a>
+        <a href="https://ko-fi.com/navchandar/" target="_blank">
+          <img
+            src="https://img.shields.io/badge/-Buy%20a%20KoFi-ff5f5f?style=for-the-badge&logo=data%3Aimage%2Fpng%3Bbase64%2CiVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAIAAADYYG7QAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAAEnQAABJ0Ad5mH3gAAAOiSURBVFhH7ZbLTxRBEMb963gkJIRleS4JyyJnDnqFKA%2BREOXAgcAJhAMEL77xoBdEjSQY8II3wchrgQUUdmZnusqvpofZzfDoBdF4mM2XSae3u%2BrXVdU1c4NLSv4rRUAmRUAmRUAmRUAmRUAmRUAmRUAmRUAmGYBo9jVlLfp1REfHfyjOZGjxM93v59JSMa6fp2QC2ssQMTkuuerqyjmQchTr38ICJZrE%2FllMBiB3M02KtEVflp0f2LmLJrUcV2PIwRBsy5bx2ndqTIR8aRmA1JYPpGDXdhxFsJdTFAzYsl1XhSftHNZrGkFc%2BUrLX2g7LSiYPM7K4NMCl5eH3EEmoO0dDQQf8Ef7BzwzQ733qKuLp6Zodw8EqDB%2B8pR6eqi7myYmaGs7h2joOGHLwSE3NIi1eJwnJ1l5GbRzwtTdU%2BhLqzggnNh16fAnd3aqqipqaBBVx%2BjWbZqb47t3KBaj%2BnqZxKC9nTY2XThGbLAXuxL57NDMY0FBkIjow8dgPlBxQFnLgplXs1RdrVpvcipFLS2EZ1OTcCQSMsYM1NaGNfxoAuuxC1R5ICQIVdzcLJcOBQCg9Y1CX1rFAVkWskAjI1RXCxpOJhUE00kPApJx0hcQe3sdrEeEcMUCIH2nYjG1uS0Fjr929wJHgS4RIRobo5oaam3V7uWsAYeewSCVUnV1PDCA0g6n7NojxEtLUiU6JJojJDhD%2FAD95u0ZKfN0TTWEK2PnbAxGR1G2ChVTGJ6ABsHDVerry7cibCm4ZTRxXbfMu%2FbSWrIWP3ioauJ%2BkAImTVNbSx0dlMlIg9BMf6sPedbBhB7IjkNDQ1wTVwFTczODBplCHzo89LrlCY33hHshgJ3jrBwJ49U1bmwM%2BdIyAZ10atiVCHlxkh4zOqpA4DEhg6gb7u%2Fn4ywuF3q3rNTSWLAAkQZjXlzkpqu%2By%2FJAiJD%2FApHTSz2Nj0v9trSAjAcHJX5K5Wm8Lf5gd492dunHOs2%2Fp55en%2BMsGqjYGgp85Jlw1ulpac3DwxI2ZPOEBuh6sezN7EvrQresrMxbPocGMgDRt1W5n8GtKYgTnlK8y8soW0mirvrC2GAXFmxucUWFbxAcZWWB8TNlAGLkBT%2FLCoBCQpyEww7Pi3T9PnsudkwcgUxAFRX0bl7sotPDsf7gKhQcn573ZuQkKytS77Bzfo5CMgFBCPj0NKfTwcdoUcKn5ouXPs1lVATQv1UEZFIEZFIEZFIEZFIEdLFKSn4Dz0s70NgRCBAAAAAASUVORK5CYII%3D&logoColor=1fb3ef&link=https://ko-fi.com/navchandar//"
+            alt="KO-FI Badge"
+          />
+        </a>
+      </footer>
+    </main>
+  </body>
+</html>
