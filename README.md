@@ -2,11 +2,14 @@
 
 Firefox extension to make containers persistent and sticky. New tabs inherit the container of the currently active tab, mimicking the default behavior in Google Chrome browser.
 
-Similar to [Sticky Containers](https://github.com/kemayo/firefox-sticky-containers) but better!
+Install this add-on from [Mozilla](https://addons.mozilla.org/en-US/firefox/addon/persitent-containers/) 
 
 ## Overview
 
 By default, Firefox opens all new tabs and bookmarks in the "No Container" state, requiring users to manually sort tabs into their respective containers. Persistent Containers intercepts the creation of new tabs and automatically routes them into the same container as the currently active tab.
+
+This works similar to [Sticky Containers](https://github.com/kemayo/firefox-sticky-containers) but better!
+
 
 ## Features
 
