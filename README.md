@@ -18,6 +18,7 @@ This works similar to [Sticky Containers](https://github.com/kemayo/firefox-stic
 - Includes a toolbar options to toggle whether new tabs open immediately next to the current tab or at the end of the tab row.
 - Use `Alt+T` to forcefully open a standard "No Container" tab, bypassing these rules.
 - Automatically ignores Private Browsing windows, session restores, and new window creations to prevent browser conflicts and memory leaks.
+- Multi-Account Containers extension can set explicit rules for different URLs. This extension respects these rules.
 
 ## Usage
 

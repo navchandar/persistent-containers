@@ -1,10 +1,14 @@
 {
   "manifest_version": 3,
   "name": "Persitent Containers",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "navchandar",
   "description": "Makes new tabs inherit the container of the currently active tab, just like Chromium browsers",
   "permissions": ["tabs", "cookies", "storage", "contextualIdentities"],
+  "optional_permissions": [],
+  "externally_connectable": {
+    "ids": ["@testpilot-containers"]
+  },
   "action": {
     "default_icon": {
       "16": "icons/icon.svg",
