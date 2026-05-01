@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Persitent Containers",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "author": "navchandar",
   "description": "Makes new tabs inherit the container of the currently active tab, just like Chromium browsers",
   "permissions": ["tabs", "cookies", "storage", "contextualIdentities"],
@@ -38,7 +38,10 @@
   "browser_specific_settings": {
     "gecko": {
       "id": "persistent-containers-mv3@navchandar.github.io",
-      "strict_min_version": "112.0"
+      "strict_min_version": "142.0",
+      "data_collection_permissions": {
+        "required": ["none"]
+      }
     }
   }
 }

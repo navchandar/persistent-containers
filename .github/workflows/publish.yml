@@ -26,10 +26,12 @@ jobs:
         run: web-ext build --source-dir . --artifacts-dir ./web-ext-artifacts
 
       - name: Publish to Mozilla Add-ons
-        # --channel=listed publishes it publicly to the store.
+        env:
+          WEB_EXT_VERBOSE: "true"
         run: |
           web-ext sign \
             --source-dir . \
             --api-key=${{ secrets.AMO_JWT_ISSUER }} \
             --api-secret=${{ secrets.AMO_JWT_SECRET }} \
             --channel=listed
+        # --channel=listed publishes it publicly to the store.
