@@ -4,6 +4,7 @@ name: Publish to Firefox Add-ons
 on:
   release:
     types: [created]
+  workflow_dispatch:
 
 jobs:
   build-and-publish:
@@ -26,9 +27,9 @@ jobs:
 
       - name: Publish to Mozilla Add-ons
         # --channel=listed publishes it publicly to the store.
-        run: >
-          web-ext sign 
-           --source-dir . 
-           --api-key=${{ secrets.AMO_JWT_ISSUER }} 
-           --api-secret=${{ secrets.AMO_JWT_SECRET }} 
-           --channel=listed
+        run: |
+          web-ext sign \
+            --source-dir . \
+            --api-key=${{ secrets.AMO_JWT_ISSUER }} \
+            --api-secret=${{ secrets.AMO_JWT_SECRET }} \
+            --channel=listed
