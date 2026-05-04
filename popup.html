@@ -21,7 +21,7 @@
         border-bottom: 1px solid #eaeaea;
         padding-bottom: 8px;
         font-weight: 600;
-        font-size: 14px;
+        font-size: 9px;
       }
 
       .setting-row {
@@ -81,10 +81,30 @@
       input:checked + .slider:before {
         transform: translateX(16px);
       }
-      
+
       input[type="checkbox"]:focus-visible + .slider {
         outline: 2px solid #005fcc;
         outline-offset: 2px;
+      }
+
+      /* --- Automatic Dark Mode Theme --- */
+      @media (prefers-color-scheme: dark) {
+        body {
+          background-color: #1f1f1f;
+          color: #f1f1f1;
+        }
+
+        header {
+          border-bottom: 1px solid #3a3a3a;
+        }
+
+        .slider {
+          background-color: #555;
+        }
+
+        input[type="checkbox"]:focus-visible + .slider {
+          outline: 2px solid #66beff;
+        }
       }
     </style>
   </head>
