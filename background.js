@@ -36,6 +36,17 @@ async function getMACAssignment(url) {
   }
 }
 
+function isSystemUrl(url) {
+  if (!url) return false;
+  return (
+    (url.startsWith("about:") &&
+      url !== "about:blank" &&
+      url !== "about:newtab") ||
+    url.startsWith("moz-extension://") ||
+    url.startsWith("chrome://")
+  );
+}
+
 // Set default to true on first install
 browser.runtime.onInstalled.addListener((details) => {
   if (details.reason === "install") {
@@ -171,27 +182,22 @@ browser.tabs.onRemoved.addListener((tabId) => {
 
 // --- Handle Keyboard Commands ---
 browser.commands.onCommand.addListener(async (command) => {
-  if (command === "open-new-tab-in-container") {
-    let currentTab;
+  if (command === "open-new-tab-without-container") {
     try {
-      [currentTab] = await browser.tabs.query({
+      const [currentTab] = await browser.tabs.query({
         active: true,
         currentWindow: true,
       });
       if (!currentTab) {
         return;
       }
-      const creationProps = {
+      // Open explicitly in firefox-default (no container)
+      const newTab = await browser.tabs.create({
+        cookieStoreId: "firefox-default",
         active: true,
         index: openNextToCurrent ? currentTab.index + 1 : undefined,
-      };
-      // If the current tab is in a container, open in that container
-      // If it's in firefox-default, just open a normal tab
-      if (currentTab.cookieStoreId !== "firefox-default") {
-        creationProps.cookieStoreId = currentTab.cookieStoreId;
-      }
-      // Mark it so the onCreated interceptor doesn't try to swap it again
-      const newTab = await browser.tabs.create(creationProps);
+      });
+      // Prevent the interceptor from swapping it back into a container
       tabsBeingCreated.add(newTab.id);
     } catch (error) {
       console.error("Persistent Containers: Error executing command:", error);
@@ -227,6 +233,10 @@ browser.tabs.onCreated.addListener(async (newTab) => {
     }
 
     const targetContainerId = currentActiveTab.cookieStoreId;
+    // Don't inherit container from system pages
+    if (isSystemUrl(currentActiveTab.url)) {
+      return;
+    }
 
     // --- The Swap Logic ---
     // Only intercept tabs in the default (no-container) context.
@@ -242,6 +252,11 @@ browser.tabs.onCreated.addListener(async (newTab) => {
         newTab.url !== "about:newtab" &&
         newTab.url !== ""
       ) {
+        // Don't containerize system pages
+        if (isSystemUrl(newTab.url)) {
+          return;
+        }
+
         await performSwap(
           newTab,
           targetContainerId,
@@ -298,6 +313,12 @@ browser.tabs.onUpdated.addListener(
 
     // EVENT A: The browser injects the URL (Bookmark/Link caught!)
     if (changeInfo.url && changeInfo.url !== "about:blank") {
+      // Don't containerize system pages
+      if (isSystemUrl(changeInfo.url)) {
+        pendingBlankTabs.delete(tabId);
+        return;
+      }
+
       pendingBlankTabs.delete(tabId); // Stop tracking
 
       const freshActiveTab = await browser.tabs

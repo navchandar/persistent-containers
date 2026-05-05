@@ -16,7 +16,7 @@ This works similar to [Sticky Containers](https://github.com/kemayo/firefox-stic
 - When opening bookmarks and external links, intercepts the new tab into the current tab's container.
 - Opens new tab/bookmarks right next to the current tab, by default.
 - Includes a toolbar options to toggle whether new tabs open immediately next to the current tab or at the end of the tab row.
-- Use shortcut `Alt+T` to open a new tab within the container, right next to the current tab.
+- Use shortcut `Alt+T` to open a new tab without any container, right next to the current tab.
 - Automatically ignores Private Browsing windows, session restores, and new window creations to prevent browser conflicts and memory leaks.
 - Multi-Account Containers extension can set explicit rules for different URLs. This extension respects these rules.
 
@@ -26,8 +26,8 @@ This works similar to [Sticky Containers](https://github.com/kemayo/firefox-stic
 
 - **Toolbar Menu:** Click the extension icon in the Firefox toolbar to access the settings menu. Here you can toggle the "Open next to current tab" preference.
 - **Keyboard Commands:**
-  - `Ctrl+T`: Open a new tab with no container.
-  - `Alt+T`: Open a new tab in current container. (This shortcut can be customized in Firefox's Add-on settings).
+  - `Ctrl+T`: Open a new tab with current container (by default).
+  - `Alt+T`: Open a new tab without container. (This shortcut can be customized in Firefox's Add-on settings).
 
 ## Permissions Used
 

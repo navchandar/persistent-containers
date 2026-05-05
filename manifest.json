@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Persitent Containers",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "author": "navchandar",
   "description": "Makes new tabs inherit the container of the currently active tab, just like Chromium browsers",
   "permissions": ["tabs", "cookies", "storage", "contextualIdentities"],
@@ -28,11 +28,11 @@
     "type": "module"
   },
   "commands": {
-    "open-new-tab-in-container": {
+    "open-new-tab-without-container": {
       "suggested_key": {
         "default": "Alt+T"
       },
-      "description": "Open a new tab in current Container"
+      "description": "Open a new tab without Container"
     }
   },
   "browser_specific_settings": {
