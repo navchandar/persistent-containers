@@ -3,13 +3,12 @@ console.info("Persistent Containers: Background script initialized.");
 // Track startup time to safely ignore massive tab bursts from Session Restores
 const STARTUP_TIME = Date.now();
 const STARTUP_GRACE_PERIOD_MS = 3000;
-const BYPASS_WINDOW_MS = 500;
 const MAC_EXTENSION_ID = "@testpilot-containers";
 
 // Trackers
 const tabsBeingCreated = new Set();
-const bypassRequests = new Map();
 const pendingBlankTabs = new Map();
+const lastActiveTab = new Map();
 
 // --- Storage Configuration ---
 let openNextToCurrent = true;
@@ -57,6 +56,26 @@ browser.storage.onChanged.addListener((changes, area) => {
     console.info(
       `Persistent Containers: openNextToCurrent setting changed to ${openNextToCurrent}`,
     );
+  }
+});
+
+// Capture the current active tab synchronously
+browser.tabs.onActivated.addListener(async ({ tabId, windowId }) => {
+  try {
+    const tab = await browser.tabs.get(tabId);
+    lastActiveTab.set(windowId, tab);
+  } catch {
+    // tab was closed before we could read it
+  }
+});
+
+// Seed lastActiveTab for all windows on startup
+browser.windows.getAll({ populate: true }).then((windows) => {
+  for (const win of windows) {
+    const active = win.tabs.find((t) => t.active);
+    if (active) {
+      lastActiveTab.set(win.id, active);
+    }
   }
 });
 
@@ -128,7 +147,7 @@ browser.tabs.onRemoved.addListener((tabId) => {
 
 // --- Handle Keyboard Commands ---
 browser.commands.onCommand.addListener(async (command) => {
-  if (command === "open-new-tab-without-container") {
+  if (command === "open-new-tab-in-container") {
     let currentTab;
     try {
       [currentTab] = await browser.tabs.query({
@@ -138,22 +157,20 @@ browser.commands.onCommand.addListener(async (command) => {
       if (!currentTab) {
         return;
       }
-
-      bypassRequests.set(currentTab.windowId, Date.now());
-
-      await browser.tabs.create({
-        cookieStoreId: "firefox-default",
-        index: openNextToCurrent ? currentTab.index + 1 : undefined,
+      const creationProps = {
         active: true,
-      });
-    } catch (error) {
-      console.error(
-        "Persistent Containers: Error executing bypass command:",
-        error,
-      );
-      if (currentTab) {
-        bypassRequests.delete(currentTab.windowId);
+        index: openNextToCurrent ? currentTab.index + 1 : undefined,
+      };
+      // If the current tab is in a container, open in that container
+      // If it's in firefox-default, just open a normal tab
+      if (currentTab.cookieStoreId !== "firefox-default") {
+        creationProps.cookieStoreId = currentTab.cookieStoreId;
       }
+      // Mark it so the onCreated interceptor doesn't try to swap it again
+      const newTab = await browser.tabs.create(creationProps);
+      tabsBeingCreated.add(newTab.id);
+    } catch (error) {
+      console.error("Persistent Containers: Error executing command:", error);
     }
   }
 });
@@ -176,19 +193,8 @@ browser.tabs.onCreated.addListener(async (newTab) => {
       return;
     }
 
-    // Bypass Command Check
-    const bypassTime = bypassRequests.get(newTab.windowId);
-    if (bypassTime && Date.now() - bypassTime < BYPASS_WINDOW_MS) {
-      bypassRequests.delete(newTab.windowId);
-      return;
-    }
-
     // --- Query Context ---
-    console.log("newTab:", newTab.id, newTab.active, newTab.cookieStoreId);
-    const [currentActiveTab] = await browser.tabs.query({
-      active: true,
-      windowId: newTab.windowId,
-    });
+    const currentActiveTab = lastActiveTab.get(newTab.windowId);
     if (!currentActiveTab) {
       return;
     }
@@ -244,6 +250,17 @@ browser.tabs.onCreated.addListener(async (newTab) => {
     );
   }
 });
+
+// Keep the cache fresh if the active tab's container or URL changes
+browser.tabs.onUpdated.addListener(
+  (tabId, changeInfo, tab) => {
+    const cached = lastActiveTab.get(tab.windowId);
+    if (cached && cached.id === tabId) {
+      lastActiveTab.set(tab.windowId, tab);
+    }
+  },
+  { properties: ["url", "status"] },
+);
 
 // --- The Deterministic Event Catcher (The Bookmark Catcher) ---
 browser.tabs.onUpdated.addListener(
@@ -305,11 +322,8 @@ setInterval(() => {
       console.warn(`Persistent Containers: Timed out pending tab ${tabId}`);
     }
   }
-
-  // Clean stale bypass entries alongside pendingBlankTabs
-  for (const [windowId, timestamp] of bypassRequests) {
-    if (now - timestamp > 5000) {
-      bypassRequests.delete(windowId);
-    }
-  }
 }, 30000);
+
+browser.windows.onRemoved.addListener((windowId) => {
+  lastActiveTab.delete(windowId);
+});

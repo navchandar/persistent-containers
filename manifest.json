@@ -28,11 +28,11 @@
     "type": "module"
   },
   "commands": {
-    "open-new-tab-without-container": {
+    "open-new-tab-in-container": {
       "suggested_key": {
         "default": "Alt+T"
       },
-      "description": "Open a new tab in No Container"
+      "description": "Open a new tab in current Container"
     }
   },
   "browser_specific_settings": {
