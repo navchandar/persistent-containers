@@ -184,6 +184,7 @@ browser.tabs.onCreated.addListener(async (newTab) => {
     }
 
     // --- Query Context ---
+    console.log("newTab:", newTab.id, newTab.active, newTab.cookieStoreId);
     const [currentActiveTab] = await browser.tabs.query({
       active: true,
       windowId: newTab.windowId,
