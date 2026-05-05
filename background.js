@@ -9,6 +9,8 @@ const MAC_EXTENSION_ID = "@testpilot-containers";
 const tabsBeingCreated = new Set();
 const pendingBlankTabs = new Map();
 const lastActiveTab = new Map();
+const bypassRequests = new Map();
+const BYPASS_WINDOW_MS = 500;
 
 // --- Storage Configuration ---
 let openNextToCurrent = true;
@@ -191,14 +193,15 @@ browser.commands.onCommand.addListener(async (command) => {
       if (!currentTab) {
         return;
       }
+      // Set bypass flag BEFORE creating the tab
+      bypassRequests.set(currentTab.windowId, Date.now());
+
       // Open explicitly in firefox-default (no container)
-      const newTab = await browser.tabs.create({
+      await browser.tabs.create({
         cookieStoreId: "firefox-default",
         active: true,
         index: openNextToCurrent ? currentTab.index + 1 : undefined,
       });
-      // Prevent the interceptor from swapping it back into a container
-      tabsBeingCreated.add(newTab.id);
     } catch (error) {
       console.error("Persistent Containers: Error executing command:", error);
     }
@@ -220,6 +223,13 @@ browser.tabs.onCreated.addListener(async (newTab) => {
 
     if (tabsBeingCreated.has(newTab.id)) {
       tabsBeingCreated.delete(newTab.id);
+      return;
+    }
+
+    // Bypass check (Alt+T) new tab without container
+    const bypassTime = bypassRequests.get(newTab.windowId);
+    if (bypassTime && Date.now() - bypassTime < BYPASS_WINDOW_MS) {
+      bypassRequests.delete(newTab.windowId);
       return;
     }
 
@@ -380,6 +390,12 @@ setInterval(() => {
     if (now - data.timestamp > 10000) {
       pendingBlankTabs.delete(tabId);
       console.warn(`Persistent Containers: Timed out pending tab ${tabId}`);
+    }
+  }
+  // cleanup bypassed new tab pages
+  for (const [windowId, timestamp] of bypassRequests) {
+    if (now - timestamp > 5000) {
+      bypassRequests.delete(windowId);
     }
   }
 }, 30000);
