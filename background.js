@@ -59,16 +59,6 @@ browser.storage.onChanged.addListener((changes, area) => {
   }
 });
 
-// Capture the current active tab synchronously
-browser.tabs.onActivated.addListener(async ({ tabId, windowId }) => {
-  try {
-    const tab = await browser.tabs.get(tabId);
-    lastActiveTab.set(windowId, tab);
-  } catch {
-    // tab was closed before we could read it
-  }
-});
-
 // Seed lastActiveTab for all windows on startup
 browser.windows.getAll({ populate: true }).then((windows) => {
   for (const win of windows) {
@@ -79,6 +69,30 @@ browser.windows.getAll({ populate: true }).then((windows) => {
   }
 });
 
+// fetch fresh tabs, check URL, call performSwap
+async function resolveBlankTab(tabId, data) {
+  pendingBlankTabs.delete(tabId);
+
+  const freshActiveTab = await browser.tabs
+    .get(data.activeTabId)
+    .catch(() => null);
+  if (!freshActiveTab) {
+    return;
+  }
+  const freshTab = await browser.tabs.get(tabId).catch(() => null);
+  if (!freshTab) {
+    return;
+  }
+  const url =
+    freshTab.url &&
+    freshTab.url !== "about:blank" &&
+    freshTab.url !== "about:newtab" &&
+    freshTab.url !== ""
+      ? freshTab.url
+      : undefined;
+  await performSwap(freshTab, data.targetContainerId, freshActiveTab, url);
+}
+
 // --- Helper Function: Perform the Tab Swap ---
 async function performSwap(
   originalTab,
@@ -86,6 +100,16 @@ async function performSwap(
   currentActiveTab,
   finalUrl,
 ) {
+  // check if container id still valid and exists
+  try {
+    await browser.contextualIdentities.get(targetContainerId);
+  } catch {
+    console.warn(
+      `Persistent Containers: Container ${targetContainerId} no longer exists. Skipping swap.`,
+    );
+    return;
+  }
+
   try {
     // Defer to Multi-Account Containers if it has an explicit assignment
     const macAssignment = await getMACAssignment(finalUrl);
@@ -296,22 +320,37 @@ browser.tabs.onUpdated.addListener(
         changeInfo.url,
       );
     }
-    // EVENT B: The browser declares the tab is 100% finished loading, but it's still blank
+    // EVENT B: Tab finished loading but still blank
     else if (changeInfo.status === "complete") {
-      pendingBlankTabs.delete(tabId); // Stop tracking
-      const freshActiveTab = await browser.tabs
-        .get(data.activeTabId)
-        .catch(() => null);
-      if (!freshActiveTab) {
+      const elapsed = Date.now() - data.timestamp;
+      if (elapsed < 300) {
+        setTimeout(() => {
+          if (!pendingBlankTabs.has(tabId)) {
+            return;
+          }
+          resolveBlankTab(tabId, data);
+        }, 300 - elapsed);
         return;
       }
-
-      await performSwap(tab, data.targetContainerId, freshActiveTab, undefined);
+      resolveBlankTab(tabId, data);
     }
   },
   // only fire for these changes
   { properties: ["url", "status"] },
 );
+
+// --- Update active tab cache on tab switch ---
+browser.tabs.onActivated.addListener(async ({ tabId, windowId }) => {
+  try {
+    const tab = await browser.tabs.get(tabId);
+    // Don't update cache if this is a pending blank tab about to be swapped
+    if (!pendingBlankTabs.has(tabId)) {
+      lastActiveTab.set(windowId, tab);
+    }
+  } catch {
+    // tab was closed
+  }
+});
 
 // Periodic cleanup of pendingBlankTabs (every 30s)
 setInterval(() => {
