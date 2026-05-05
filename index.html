@@ -78,9 +78,7 @@
 
       /* Header & Hero Section */
       header {
-        margin-bottom: 3rem;
-        border-bottom: 1px solid var(--border-color);
-        padding: 3rem 0;
+        padding: 0 0 3rem 0;
         text-align: center;
       }
 
@@ -318,12 +316,21 @@
             <ul>
               <li>
                 <code>Ctrl+T</code>: Open a new tab in the current container.
+                (default behavior)
               </li>
               <li>
                 <code>Alt+T</code>: Open a new tab without a container. (Note:
                 This shortcut can be customized in Firefox's Add-on settings).
               </li>
             </ul>
+          </li>
+          <li>
+            <strong>Known Limitation:</strong>
+            This extension cannot distinguish When selecting "No Container" tab
+            Firefox creates the tab identically to a regular
+            <code>Ctrl+T</code>. The tab will be opened in the current
+            container. Use <code>Alt+T</code> to open a new tab without a
+            container.
           </li>
         </ul>
       </section>
