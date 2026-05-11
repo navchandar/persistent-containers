@@ -6,7 +6,7 @@
     <style>
       body {
         margin: 0;
-        border: 2px solid black;
+        border: 1px solid rgb(207, 207, 207);
         background-color: #ffffff;
         padding: 12px;
         width: 240px;
@@ -30,6 +30,10 @@
         align-items: center;
         gap: 10px;
         padding: 8px;
+      }
+
+      .setting-row:hover .toggle-switch {
+        transform: scale(1.05);
       }
 
       .label-text {
@@ -89,10 +93,28 @@
         outline-offset: 2px;
       }
 
+      .link-container {
+        display: flex;
+        flex-direction: row;
+        justify-content: center;
+        align-items: center;
+        gap: 15px;
+        margin-top: 20px;
+        font-size: 0.8rem;
+      }
+
+      a {
+        text-decoration: none;
+      }
+
+      a:hover {
+        text-decoration: underline;
+      }
+
       /* --- Automatic Dark Mode Theme --- */
       @media (prefers-color-scheme: dark) {
         body {
-          border: 2px solid white;
+          border: 1px solid rgb(118, 118, 118);
           background-color: #1f1f1f;
           color: #f1f1f1;
         }
@@ -130,7 +152,27 @@
         />
         <span class="slider" aria-hidden="true"></span>
       </label>
-      <span id="toggleLabel" class="label-text">Open next to current tab</span>
+      <label id="toggleLabel" for="openNextToCurrent" class="label-text">
+        Open next to current tab
+      </label>
+    </div>
+
+    <div class="link-container" aria-label="Footer links">
+      <a
+        href="https://github.com/navchandar/persistent-containers"
+        aria-label="View the source code on GitHub"
+        target="_blank"
+        rel="noopener noreferrer"
+        >Source</a
+      >
+      <span style="color: #ccc" aria-hidden="true">|</span>
+      <a
+        href="https://navchandar.github.io/persistent-containers/"
+        aria-label="Visit our help and support documentation"
+        target="_blank"
+        rel="noopener noreferrer"
+        >Help</a
+      >
     </div>
 
     <script src="popup.js"></script>
