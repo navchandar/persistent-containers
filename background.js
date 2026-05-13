@@ -14,6 +14,7 @@ const BYPASS_WINDOW_MS = 500;
 
 // --- Storage Configuration ---
 let openNextToCurrent = true;
+let inheritTabGroup = true;
 
 /**
  * Query Multi-Account Containers for a URL assignment.
@@ -58,17 +59,28 @@ browser.runtime.onInstalled.addListener((details) => {
 });
 
 // Load the current setting into memory
-browser.storage.local.get({ openNextToCurrent: true }).then((res) => {
-  openNextToCurrent = res.openNextToCurrent;
-});
+browser.storage.local
+  .get({ openNextToCurrent: true, inheritTabGroup: true })
+  .then((res) => {
+    openNextToCurrent = res.openNextToCurrent;
+    inheritTabGroup = res.inheritTabGroup;
+  });
 
 // Listen for the user changing the setting in the popup
 browser.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && changes.openNextToCurrent?.newValue !== undefined) {
-    openNextToCurrent = changes.openNextToCurrent.newValue;
-    console.info(
-      `Persistent Containers: openNextToCurrent setting changed to ${openNextToCurrent}`,
-    );
+  if (area === "local") {
+    if (changes.openNextToCurrent?.newValue !== undefined) {
+      openNextToCurrent = changes.openNextToCurrent.newValue;
+      console.info(
+        `Persistent Containers: openNextToCurrent changed to ${openNextToCurrent}`,
+      );
+    }
+    if (changes.inheritTabGroup?.newValue !== undefined) {
+      inheritTabGroup = changes.inheritTabGroup.newValue;
+      console.info(
+        `Persistent Containers: inheritTabGroup changed to ${inheritTabGroup}`,
+      );
+    }
   }
 });
 
@@ -81,6 +93,38 @@ browser.windows.getAll({ populate: true }).then((windows) => {
     }
   }
 });
+
+/**
+ * If inheritTabGroup is enabled and the source tab is in a group,
+ * add targetTabId to that same group.
+ * Uses feature detection so older Firefox versions won't crash.
+ */
+async function maybeInheritTabGroup(targetTabId, sourceTab) {
+  if (!inheritTabGroup) {
+    return;
+  }
+  if (!browser.tabs.group) {
+    return;
+  }
+
+  const groupId = sourceTab.groupId;
+  // tabGroups.TAB_GROUP_ID_NONE === -1
+  if (groupId === undefined || groupId === -1) {
+    return;
+  }
+
+  try {
+    await browser.tabs.group({ tabIds: [targetTabId], groupId });
+    console.info(
+      `Persistent Containers: Added tab ${targetTabId} to group ${groupId}`,
+    );
+  } catch (err) {
+    console.warn(
+      `Persistent Containers: Could not add tab to group ${groupId}:`,
+      err,
+    );
+  }
+}
 
 // fetch fresh tabs, check URL, call performSwap
 async function resolveBlankTab(tabId, data) {
@@ -171,6 +215,8 @@ async function performSwap(
     console.info(
       `Persistent Containers: Swapped tab. Container: ${targetContainerId}, URL: ${finalUrl || "New Tab"}`,
     );
+    //Inherit tab group from the active tab
+    await maybeInheritTabGroup(replacementTab.id, currentActiveTab);
   } catch (error) {
     console.error("Persistent Containers: Error during swap:", error);
   }
@@ -195,13 +241,15 @@ browser.commands.onCommand.addListener(async (command) => {
       }
       // Set bypass flag BEFORE creating the tab
       bypassRequests.set(currentTab.windowId, Date.now());
-
       // Open explicitly in firefox-default (no container)
-      await browser.tabs.create({
+      const newTab = await browser.tabs.create({
         cookieStoreId: "firefox-default",
         active: true,
         index: openNextToCurrent ? currentTab.index + 1 : undefined,
       });
+
+      // Even when bypassing containers, tabs can inherit the group
+      await maybeInheritTabGroup(newTab.id, currentTab);
     } catch (error) {
       console.error("Persistent Containers: Error executing command:", error);
     }
@@ -291,6 +339,10 @@ browser.tabs.onCreated.addListener(async (newTab) => {
           undefined,
         );
       }
+    }
+    // No container swap needed, but still inherit tab group
+    else {
+      await maybeInheritTabGroup(newTab.id, currentActiveTab);
     }
   } catch (error) {
     console.error(

@@ -4,7 +4,13 @@
   "version": "1.0.7",
   "author": "navchandar",
   "description": "Makes new tabs inherit the container of the currently active tab, just like Chromium browsers",
-  "permissions": ["tabs", "cookies", "storage", "contextualIdentities"],
+  "permissions": [
+    "tabs",
+    "cookies",
+    "contextualIdentities",
+    "storage",
+    "tabGroups"
+  ],
   "optional_permissions": [],
   "externally_connectable": {
     "ids": ["@testpilot-containers"]
