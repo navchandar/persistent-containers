@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Persitent Containers",
-  "version": "1.0.7",
+  "version": "2.0.0",
   "author": "navchandar",
   "description": "Makes new tabs inherit the container of the currently active tab, just like Chromium browsers",
   "permissions": [
