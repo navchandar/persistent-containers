@@ -1,8 +1,21 @@
 console.info("Persistent Containers: Background script initialized.");
 
-// Track startup time to safely ignore massive tab bursts from Session Restores
-const STARTUP_TIME = Date.now();
+// Safely ignore massive tab bursts from Session Restores. The grace period
+// must be anchored to the *browser* startup, not to this script loading:
+// MV3 background scripts are torn down after a short idle period and reloaded
+// on the next event, so module-load time is NOT a safe proxy for browser
+// startup. With the old module constant, every wake-up re-armed a fresh
+// 3-second black hole and the first user-created tab silently stayed in the
+// default container. browser.storage.session survives event-page reloads and
+// is cleared on browser shutdown — exactly the lifetime of a browser session.
+//
+// The grace window is armed ONLY by real browser-start signals
+// (runtime.onStartup, and an onStartup that fired within the last 3 seconds
+// survives reloads via the storage.session anchor). Mid-session script
+// loads — temporary add-on install, wake-from-idle — never arm it, so the
+// user's first tab creation is never swallowed.
 const STARTUP_GRACE_PERIOD_MS = 3000;
+const SESSION_START_KEY = "browserSessionStart";
 const MAC_EXTENSION_ID = "@testpilot-containers";
 
 // Trackers
@@ -11,6 +24,45 @@ const pendingBlankTabs = new Map();
 const lastActiveTab = new Map();
 const bypassRequests = new Map();
 const BYPASS_WINDOW_MS = 500;
+const ACTIVE_TAB_CACHE_KEY = "lastActiveTabByWindow";
+
+// Feature-gate every storage.session touch: this script runs before any
+// await, so an unguarded top-level access could throw at load and register
+// no listeners at all (which would look like "never inherits anything").
+const hasSessionStorage = !!(browser.storage && browser.storage.session);
+
+// storage.session mirror of the last-active-tab cache. It survives MV3
+// event-page reloads within a browser session and is cleared on shutdown —
+// exactly the cache's intended lifetime. Without it, the cache is empty
+// after every idle teardown and the first tab creation after a wake-up has
+// no inheritance source (plain Ctrl+T carries no openerTabId, and querying
+// the window's active tab returns the just-created tab itself).
+function persistLastActiveTab() {
+  if (!hasSessionStorage) {
+    return;
+  }
+  browser.storage.session
+    .set({ [ACTIVE_TAB_CACHE_KEY]: Object.fromEntries(lastActiveTab) })
+    .catch(() => {});
+}
+
+function setLastActiveTab(windowId, tab) {
+  lastActiveTab.set(windowId, tab);
+  persistLastActiveTab();
+}
+
+// Issued at load time — i.e. before any event can be delivered to this
+// reload — so the resolved snapshot still names each window's PRE-creation
+// active tab even after tabs.onActivated has contaminated the live cache.
+const hydratedActiveTabCache = hasSessionStorage
+  ? browser.storage.session
+      .get(ACTIVE_TAB_CACHE_KEY)
+      .then((res) => {
+        const saved = res[ACTIVE_TAB_CACHE_KEY];
+        return saved && typeof saved === "object" ? saved : {};
+      })
+      .catch(() => ({}))
+  : Promise.resolve({});
 
 // --- Storage Configuration ---
 let openNextToCurrent = true;
@@ -48,6 +100,49 @@ function isSystemUrl(url) {
     url.startsWith("moz-extension://") ||
     url.startsWith("chrome://")
   );
+}
+
+// Arm the session-restore grace ONLY on real browser start. runtime.onStartup
+// fires exactly once per browser launch. The storage.session anchor lets a
+// later event-page reload during the same startup burst still see the grace;
+// the in-memory value covers this instance directly. Mid-session loads
+// (temporary add-on install, wake-from-idle) arm NOTHING, so the user's first
+// real tab creation is never swallowed.
+let startupGraceUntil = 0;
+
+function armStartupGrace() {
+  const now = Date.now();
+  startupGraceUntil = now + STARTUP_GRACE_PERIOD_MS;
+  if (hasSessionStorage) {
+    browser.storage.session
+      .set({ [SESSION_START_KEY]: now })
+      .catch(() => {});
+  }
+}
+
+browser.runtime.onStartup.addListener(armStartupGrace);
+
+async function inBrowserStartupGrace() {
+  if (Date.now() < startupGraceUntil) {
+    return true;
+  }
+  if (!hasSessionStorage) {
+    return false;
+  }
+  try {
+    const stored = await browser.storage.session.get(SESSION_START_KEY);
+    const value = stored[SESSION_START_KEY];
+    if (
+      typeof value === "number" &&
+      Date.now() - value < STARTUP_GRACE_PERIOD_MS
+    ) {
+      return true;
+    }
+  } catch {
+    // storage.session read failure: treat as not-in-grace (better a swapped
+    // restore tab than permanently broken inheritance).
+  }
+  return false;
 }
 
 // Set default to true on first install
@@ -89,7 +184,7 @@ browser.windows.getAll({ populate: true }).then((windows) => {
   for (const win of windows) {
     const active = win.tabs.find((t) => t.active);
     if (active) {
-      lastActiveTab.set(win.id, active);
+      setLastActiveTab(win.id, active);
     }
   }
 });
@@ -259,8 +354,30 @@ browser.commands.onCommand.addListener(async (command) => {
 // --- Core Interceptor ---
 browser.tabs.onCreated.addListener(async (newTab) => {
   try {
-    // Ignore Session Restores (tabs created immediately when the browser opens)
-    if (Date.now() - STARTUP_TIME < STARTUP_GRACE_PERIOD_MS) {
+    // Read the active-tab cache synchronously at handler entry, BEFORE any
+    // await: tabs.onActivated fires shortly after onCreated for foreground
+    // tabs and would otherwise be able to overwrite the inheritance source
+    // while this handler is suspended.
+    let currentActiveTab = lastActiveTab.get(newTab.windowId);
+    // Remember the synchronous opener hint from the event itself (link
+    // clicks, window.open). tabs.get() on it after the awaits below is
+    // immune to the onActivated race, unlike an {active:true} query, which
+    // can return the just-activated new tab.
+    let openerCandidate = null;
+    if (
+      !currentActiveTab &&
+      newTab.openerTabId &&
+      newTab.openerTabId !== newTab.id
+    ) {
+      openerCandidate = newTab.openerTabId;
+    }
+
+    // Ignore Session Restores (tabs created in a burst right after the
+    // browser itself opens). Armed only by runtime.onStartup / its
+    // storage.session anchor — never by a mid-session script load, so a
+    // wake-from-idle or a temporary install does NOT swallow the user's
+    // first real tab creation.
+    if (await inBrowserStartupGrace()) {
       return;
     }
 
@@ -282,9 +399,56 @@ browser.tabs.onCreated.addListener(async (newTab) => {
     }
 
     // --- Query Context ---
-    const currentActiveTab = lastActiveTab.get(newTab.windowId);
+    // Cache was empty at handler entry (event-page reload after idle
+    // teardown, or a window that appeared while the script was asleep).
+    // Reconstruct the inheritance source, most trustworthy first:
+    // 1) the storage.session mirror snapshot, read at load time BEFORE any
+    //    event of this reload was delivered — it still names the pre-creation
+    //    active tab even though onActivated has since overwritten the live
+    //    cache with the new tab (covers plain Ctrl+T, which carries no
+    //    openerTabId);
+    // 2) the opener tab from the creation event (link clicks, window.open),
+    //    deterministic and immune to the onActivated race;
+    // 3) last resort: the window's current active tab.
+    // The final id check rejects every path that resolves to the new tab
+    // itself (new window / first tab / activated-tab query) — the same safe
+    // no-op the guards below would apply.
     if (!currentActiveTab) {
-      return;
+      // First tab of a (new) window — keep ignoring new window creations, as
+      // session restore does at startup.
+      if (newTab.index === 0) {
+        return;
+      }
+      const hydrated = await hydratedActiveTabCache;
+      const savedEntry = hydrated[newTab.windowId];
+      if (savedEntry && typeof savedEntry.id === "number") {
+        // Re-read live: the tab may have been closed, moved containers, or
+        // navigated while this script slept.
+        currentActiveTab = await browser.tabs
+          .get(savedEntry.id)
+          .catch(() => null);
+      }
+      if (!currentActiveTab && openerCandidate) {
+        currentActiveTab = await browser.tabs
+          .get(openerCandidate)
+          .catch(() => null);
+      }
+      // Rejected candidates (cross-window opener, recycled id): the swap
+      // placement math and the cache key assume the same window.
+      if (currentActiveTab && currentActiveTab.windowId !== newTab.windowId) {
+        currentActiveTab = null;
+      }
+      if (!currentActiveTab) {
+        const [activeTab] = await browser.tabs.query({
+          active: true,
+          windowId: newTab.windowId,
+        });
+        currentActiveTab = activeTab ?? null;
+      }
+      if (!currentActiveTab || currentActiveTab.id === newTab.id) {
+        return;
+      }
+      setLastActiveTab(newTab.windowId, currentActiveTab);
     }
     if (currentActiveTab.id === newTab.id && newTab.index === 0) {
       return;
@@ -357,7 +521,7 @@ browser.tabs.onUpdated.addListener(
   (tabId, changeInfo, tab) => {
     const cached = lastActiveTab.get(tab.windowId);
     if (cached && cached.id === tabId) {
-      lastActiveTab.set(tab.windowId, tab);
+      setLastActiveTab(tab.windowId, tab);
     }
   },
   { properties: ["url", "status"] },
@@ -428,7 +592,7 @@ browser.tabs.onActivated.addListener(async ({ tabId, windowId }) => {
     const tab = await browser.tabs.get(tabId);
     // Don't update cache if this is a pending blank tab about to be swapped
     if (!pendingBlankTabs.has(tabId)) {
-      lastActiveTab.set(windowId, tab);
+      setLastActiveTab(windowId, tab);
     }
   } catch {
     // tab was closed
@@ -454,4 +618,5 @@ setInterval(() => {
 
 browser.windows.onRemoved.addListener((windowId) => {
   lastActiveTab.delete(windowId);
+  persistLastActiveTab();
 });
