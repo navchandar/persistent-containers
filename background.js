@@ -48,6 +48,73 @@ let initializing = true;
 let persistenceRequested = false;
 let persistenceRunning = false;
 
+const LOG_PREFIX = "Persistent Containers";
+
+function describeError(error) {
+    if (error instanceof Error) {
+        return {
+            name: error.name,
+            message: error.message,
+            stack: error.stack,
+        };
+    }
+    if (
+        error &&
+        typeof error === "object" &&
+        typeof error.message === "string"
+    ) {
+        return {
+            name: error.name ?? "Error",
+            message: error.message,
+            stack: error.stack,
+        };
+    }
+    return {
+        name: "UnknownError",
+        message: String(error),
+    };
+}
+
+function reportError(code, message, error, context = {}, recovery = "") {
+    console.error(
+        `[${LOG_PREFIX}] ${code}: ${message}`, {
+            ...context,
+            error: describeError(error),
+            recovery,
+        },
+    );
+}
+
+function reportWarning(code, message, context = {}) {
+    console.warn(
+        `[${LOG_PREFIX}] ${code}: ${message}`,
+        context,
+    );
+}
+// These catch otherwise-unhandled runtime failures.
+// They cannot catch a syntax error that prevents this file from loading.
+globalThis.addEventListener("error", (event) => {
+    reportError(
+        "BACKGROUND_UNCAUGHT",
+        "An uncaught background-script error occurred.",
+        event.error ?? event.message, {
+            file: event.filename,
+            line: event.lineno,
+            column: event.colno,
+        },
+        "Copy the first error and stack trace from the Browser Console.",
+    );
+});
+globalThis.addEventListener("unhandledrejection", (event) => {
+    reportError(
+        "BACKGROUND_UNHANDLED_PROMISE",
+        "An asynchronous operation failed without a local error handler.",
+        event.reason, {},
+        "Report this error with the action that triggered it.",
+    );
+});
+
+
 // -----------------------------------------------------------------------------
 // Basic helpers
 // -----------------------------------------------------------------------------
@@ -113,32 +180,60 @@ function hasSplitView(tab) {
     );
 }
 
+function isMissingTabError(error) {
+    const message = describeError(error).message;
+    // Known missing-tab message patterns. These are intentionally narrow.
+    return (
+        /invalid tab id/i.test(message) ||
+        /no tab with id/i.test(message) ||
+        /tab .* does not exist/i.test(message)
+    );
+}
 async function getTab(tabId) {
     if (!isTabId(tabId)) {
         return null;
     }
-
     try {
         return await browser.tabs.get(tabId);
-    } catch {
-        // The tab may have been closed or moved out of accessible context.
-        return null;
+    } catch (error) {
+        if (isMissingTabError(error)) {
+            // Expected when the user closes a tab during processing.
+            return null;
+        }
+        reportError(
+            "TAB_LOOKUP_FAILED",
+            "Firefox could not retrieve a tab.",
+            error, {
+                tabId
+            },
+            "Check extension permissions and the preceding Browser Console errors.",
+        );
+        // Do not misinterpret an unexpected API failure as a missing tab.
+        throw error;
     }
 }
-
 async function removeTabQuietly(tabId) {
+    if (!isTabId(tabId)) {
+        return;
+    }
     try {
         await browser.tabs.remove(tabId);
     } catch (error) {
-        if (await getTab(tabId)) {
-            console.warn(
-                "Persistent Containers: Could not remove temporary tab:",
-                tabId,
-                error,
-            );
+        if (isMissingTabError(error)) {
+            return;
         }
+        reportError(
+            "TAB_CLEANUP_FAILED",
+            "Could not remove a temporary replacement tab.",
+            error, {
+                tabId
+            },
+            "The original and replacement may both remain open. Check them before closing either.",
+        );
     }
 }
+
+
 
 async function withTimeout(promise, milliseconds, fallback) {
     let timer;
@@ -190,22 +285,16 @@ function persistState() {
     if (!addonSession) {
         return;
     }
-
     persistenceRequested = true;
-
     if (persistenceRunning) {
         return;
     }
-
     persistenceRunning = true;
-
     Promise.resolve()
         .then(async () => {
             await ready;
-
             while (persistenceRequested) {
                 persistenceRequested = false;
-
                 await addonSession.set({
                     [STATE_KEY]: {
                         startupGraceUntil,
@@ -215,21 +304,26 @@ function persistState() {
             }
         })
         .catch((error) => {
-            console.warn(
-                "Persistent Containers: Could not persist runtime state:",
-                error,
+            // Do not create a tight retry loop after a storage failure.
+            // A subsequent event can request a fresh write.
+            persistenceRequested = false;
+            reportError(
+                "SESSION_SAVE_FAILED",
+                "Could not save the active-tab recovery state.",
+                error, {
+                    trackedWindows: activeHistory.size,
+                },
+                "Inheritance after background unloading may be affected. Check initialization and storage errors.",
             );
         })
         .finally(() => {
             persistenceRunning = false;
-
-            // A new event may have requested persistence while a write
-            // or its error handler was running.
             if (persistenceRequested) {
                 persistState();
             }
         });
 }
+
 
 function rememberActiveTab(windowId, tabId, previousTabId) {
     if (!isTabId(tabId)) {
@@ -321,11 +415,9 @@ function rememberReplacement(originalId, replacementId, windowId) {
 
         map.set(windowId, {
             current: history.current === originalId ?
-                replacementId :
-                history.current,
+                replacementId : history.current,
             previous: history.previous === originalId ?
-                replacementId :
-                history.previous,
+                replacementId : history.previous,
         });
     }
 
@@ -441,11 +533,9 @@ async function initialize() {
 
                 const entry = {
                     current: isTabId(history.current) ?
-                        history.current :
-                        null,
+                        history.current : null,
                     previous: isTabId(history.previous) ?
-                        history.previous :
-                        null,
+                        history.previous : null,
                 };
 
                 savedHistory.set(windowId, entry);
@@ -478,8 +568,7 @@ async function initialize() {
             activeHistory.set(win.id, {
                 current: activeTab.id,
                 previous: old?.current === activeTab.id ?
-                    old.previous :
-                    old?.current ?? null,
+                    old.previous : old?.current ?? null,
             });
         }
     }
@@ -495,23 +584,28 @@ async function initialize() {
 // -----------------------------------------------------------------------------
 // Multi-Account Containers integration
 // -----------------------------------------------------------------------------
+function isMissingMessageReceiver(error) {
+    const message = describeError(error).message;
+    return (
+        /receiving end does not exist/i.test(message) ||
+        /could not establish connection/i.test(message)
+    );
+}
 
 async function hasMACAssignment(url) {
     let parsed;
-
     try {
         parsed = new URL(url);
     } catch {
         return false;
     }
-
     if (
         parsed.protocol !== "http:" &&
         parsed.protocol !== "https:"
     ) {
         return false;
     }
-
+    const timedOut = Symbol("mac-message-timeout");
     try {
         const assignment = await withTimeout(
             browser.runtime.sendMessage(MAC_EXTENSION_ID, {
@@ -519,29 +613,63 @@ async function hasMACAssignment(url) {
                 url,
             }),
             MAC_TIMEOUT_MS,
-            null,
+            timedOut,
         );
-
-        if (!assignment || typeof assignment !== "object") {
+        if (assignment === timedOut) {
+            reportWarning(
+                "MAC_ASSIGNMENT_TIMEOUT",
+                "Multi-Account Containers did not respond in time. Falling back to ordinary inheritance.", {
+                    timeoutMs: MAC_TIMEOUT_MS,
+                },
+            );
             return false;
         }
-
-        // MAC's external handler returns the stored site assignment.
-        // That object uses userContextId, not cookieStoreId.
+        if (assignment === null || assignment === undefined) {
+            return false;
+        }
+        if (typeof assignment !== "object") {
+            reportWarning(
+                "MAC_UNEXPECTED_RESPONSE",
+                "Multi-Account Containers returned an unexpected response.", {
+                    responseType: typeof assignment,
+                },
+            );
+            return false;
+        }
         const contextId = assignment.userContextId;
-
-        return (
+        // An empty object can represent no assignment.
+        if (contextId === null || contextId === undefined) {
+            return false;
+        }
+        const valid =
             (
                 typeof contextId === "string" ||
                 typeof contextId === "number"
             ) &&
-            /^[1-9]\d*$/.test(String(contextId))
-        );
-    } catch {
-        // MAC may not be installed, or may reject the external message.
+            /^[1-9]\d*$/.test(String(contextId));
+        if (!valid) {
+            reportWarning(
+                "MAC_INVALID_CONTEXT_ID",
+                "Multi-Account Containers returned an unsupported assignment ID.", {
+                    contextIdType: typeof contextId,
+                },
+            );
+        }
+        return valid;
+    } catch (error) {
+        if (!isMissingMessageReceiver(error)) {
+            reportError(
+                "MAC_ASSIGNMENT_FAILED",
+                "Could not check the optional Multi-Account Containers assignment.",
+                error, {},
+                "Ordinary inheritance will continue. Check whether the installed MAC version supports this message.",
+            );
+        }
         return false;
     }
 }
+
+
 
 // -----------------------------------------------------------------------------
 // Tab grouping
@@ -596,10 +724,17 @@ async function applyTabGrouping(
         }
     } catch (error) {
         // A grouping failure must not undo successful container inheritance.
-        console.warn(
-            "Persistent Containers: Could not apply tab grouping:",
-            error,
+        reportError(
+            "TAB_GROUPING_FAILED",
+            "Could not apply the requested tab group.",
+            error, {
+                targetTabId,
+                sourceTabId,
+                desiredGroupId,
+            },
+            "Container handling can continue, but the tab group may be unchanged.",
         );
+
     }
 }
 
@@ -953,8 +1088,7 @@ async function replaceTab(record, expected, sourceTab) {
             muted: Boolean(original.mutedInfo?.muted),
             openerTabId: opener.id,
             index: settings.openNextToCurrent ?
-                source.index + 1 :
-                original.index,
+                source.index + 1 : original.index,
         };
 
         if (!isNewTabUrl(original.url)) {
@@ -1055,10 +1189,20 @@ async function replaceTab(record, expected, sourceTab) {
             retry: false
         };
     } catch (error) {
-        console.error(
-            "Persistent Containers: Container replacement failed:",
-            error,
+
+        reportError(
+            "TAB_REPLACEMENT_FAILED",
+            "Could not complete container inheritance.",
+            error, {
+                originalTabId: record.id,
+                replacementTabId: replacement?.id ?? null,
+                windowId: record.windowId,
+                removalStarted,
+                committed,
+            },
+            "The script will attempt cleanup. Check whether the original or replacement tab remains open.",
         );
+
 
         const remainingOriginal = await getTab(record.id);
 
@@ -1316,9 +1460,15 @@ browser.tabs.onCreated.addListener((newTab) => {
         try {
             resultId = await processCreatedTab(record);
         } catch (error) {
-            console.error(
-                "Persistent Containers: Tab processing failed:",
-                error,
+            reportError(
+                "TAB_PROCESSING_FAILED",
+                "Could not finish processing a newly created tab.",
+                error, {
+                    tabId: record.id,
+                    windowId: record.windowId,
+                    cancelled: record.cancelled,
+                },
+                "The tab may remain unchanged. Check the preceding error for the underlying cause.",
             );
 
             resultId = record.cancelled ? null : record.id;
@@ -1347,17 +1497,13 @@ browser.tabs.onCreated.addListener((newTab) => {
     });
 });
 
-browser.tabs.onUpdated.addListener(
-    (tabId) => {
-        const record = pendingTabs.get(tabId);
+browser.tabs.onUpdated.addListener((tabId) => {
+    const record = pendingTabs.get(tabId);
+    if (record) {
+        signalRecord(record);
+    }
+});
 
-        if (record) {
-            signalRecord(record);
-        }
-    }, {
-        properties: ["url", "status", "discarded", "openerTabId"],
-    },
-);
 
 browser.tabs.onActivated.addListener((activeInfo) => {
     const {
@@ -1506,10 +1652,16 @@ browser.commands.onCommand.addListener((command, commandTab) => {
     };
 
     execute().catch((error) => {
-        console.error(
-            "Persistent Containers: No-container command failed:",
-            error,
+
+        reportError(
+            "NO_CONTAINER_COMMAND_FAILED",
+            "The command could not finish opening a non-container tab.",
+            error, {
+                command
+            },
+            "Check the preceding error and whether a new tab was already created.",
         );
+
     });
 });
 
@@ -1517,19 +1669,40 @@ browser.commands.onCommand.addListener((command, commandTab) => {
 // Initialize after synchronous listener registration.
 // -----------------------------------------------------------------------------
 
+console.info(
+    "[Persistent Containers] LISTENERS_READY: All event listeners registered.",
+);
 const ready = initialize()
-    .catch((error) => {
-        console.error(
-            "Persistent Containers: Initialization failed; " +
-            "continuing with available state:",
-            error,
+    .then(() => {
+        console.info(
+            "[Persistent Containers] INITIALIZATION_READY: Background initialization completed.", {
+                sessionStorageAvailable: Boolean(addonSession),
+                trackedWindows: activeHistory.size,
+                openNextToCurrent: settings.openNextToCurrent,
+                inheritTabGroup: settings.inheritTabGroup,
+            },
         );
+    })
+    .catch((error) => {
+        reportError(
+            "INITIALIZATION_FAILED",
+            "Background initialization did not complete. Tab replacement will not proceed.",
+            error, {},
+            "Reload the extension after fixing the first reported error. Do not uninstall it just to troubleshoot.",
+        );
+        throw error;
     })
     .finally(() => {
         initializing = false;
         touchedWindows.clear();
     });
-
-ready.then(() => {
-    persistState();
-});
+// Attach an explicit rejection handler so a failed initialization does not
+// create an additional unhandled rejection from this startup chain.
+ready.then(
+    () => {
+        persistState();
+    },
+    () => {
+        // INITIALIZATION_FAILED was already reported above.
+    },
+);
