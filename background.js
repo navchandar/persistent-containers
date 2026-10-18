@@ -1083,7 +1083,9 @@ async function replaceTab(record, expected, sourceTab) {
         const properties = {
             windowId: record.windowId,
             cookieStoreId: containerId,
-            active: false,
+            // Create a foreground New Tab as active immediately.
+            // Keep website replacements and background tabs inactive.
+            active: Boolean(freshOriginal.active && isNewTabUrl(freshOriginal.url)),
             pinned: Boolean(original.pinned),
             muted: Boolean(original.mutedInfo?.muted),
             openerTabId: opener.id,
