@@ -1,9 +1,20 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
-  <rect x="12" y="12" width="104" height="104" rx="24" fill="#37ADFF" />
-  
-  <circle cx="64" cy="44" r="16" fill="#fd4646" />
-  
-  <path d="M 64 60 L 64 104" stroke="#FFFFFF" stroke-width="6" stroke-linecap="round" />
-  
-  <rect x="12" y="12" width="104" height="104" rx="24" fill="none" stroke="#000000" stroke-opacity="0.5" stroke-width="4" />
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="a" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#47b7ff"/>
+      <stop offset="100%" stop-color="#1482e5"/>
+    </linearGradient>
+    <filter id="b" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="2.5" flood-color="#00356b" flood-opacity=".3"/>
+    </filter>
+  </defs>
+  <rect x="12" y="12" width="104" height="104" rx="24" fill="url(#a)"/>
+  <rect x="13" y="13" width="102" height="102" rx="23" fill="none" stroke="#fff" stroke-opacity=".25" stroke-width="2"/>
+  <rect x="12" y="12" width="104" height="104" rx="24" fill="none" stroke="#000" stroke-opacity=".18" stroke-width="3"/>
+  <g filter="url(#b)">
+    <path stroke="#fff" stroke-width="7" stroke-linecap="round" d="M64 56v40"/>
+    <circle cx="64" cy="96" r="5" fill="#fff"/>
+    <circle cx="64" cy="46" r="17" fill="#fff"/>
+    <circle cx="64" cy="46" r="13.5" fill="#fd4646"/>
+  </g>
 </svg>
