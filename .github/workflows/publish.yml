@@ -10,6 +10,9 @@ jobs:
   build-and-publish:
     runs-on: ubuntu-latest
 
+    permissions:
+      contents: write # Needed if uploading assets to the GitHub Release
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -22,16 +25,41 @@ jobs:
       - name: Install web-ext
         run: npm install -g web-ext
 
-      - name: Build the Extension Zip
-        run: web-ext build --source-dir . --artifacts-dir ./web-ext-artifacts
+      - name: Build Extension Package
+        run: |
+          mkdir -p ./web-ext-artifacts
+          # Builds the package (.zip)
+          web-ext build --source-dir . --artifacts-dir ./web-ext-artifacts --overwrite-dest
+          
+          # Create an .xpi copy of the build (an .xpi is just a zip archive)
+          cd ./web-ext-artifacts
+          for f in *.zip; do
+            cp "$f" "${f%.zip}.xpi"
+          done
 
+      # Upload to GitHub Actions Run Artifacts (accessible in Actions tab)
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-ext-artifacts
+          path: ./web-ext-artifacts/*
+          retention-days: 14
+
+      # Attach the .xpi directly to the GitHub Release page
+      - name: Attach XPI to GitHub Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ./web-ext-artifacts/*.xpi
+
+      # Submit to AMO store
       - name: Publish to Mozilla Add-ons
         env:
           WEB_EXT_VERBOSE: "true"
         run: |
           web-ext sign \
             --source-dir . \
-            --api-key=${{ secrets.AMO_JWT_ISSUER }} \
-            --api-secret=${{ secrets.AMO_JWT_SECRET }} \
+            --api-key="${{ secrets.AMO_JWT_ISSUER }}" \
+            --api-secret="${{ secrets.AMO_JWT_SECRET }}" \
             --channel=listed
-        # --channel=listed publishes it publicly to the store.
+            # --channel=listed publishes it publicly to the store.
