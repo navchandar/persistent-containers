@@ -1,224 +1,241 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Persistent Containers</title>
-    <style>
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Persistent Containers</title>
+  <style>
+    /* --- Design Tokens & Color Palettes --- */
+    :root {
+      --bg-color: #ffffff;
+      --text-color: #15141a;
+      --text-muted: #5b5b66;
+      --border-color: #e0e0e6;
+      --hover-bg: rgba(0, 0, 0, 0.05);
+      --accent-color: #37adff;
+      --accent-focus: #0060df;
+      --toggle-bg-off: #cfcfd8;
+      --link-color: #0060df;
+    }
+
+    /* Automatic Firefox/OS Dark Mode */
+    @media (prefers-color-scheme: dark) {
       :root {
-        --bg-color: #ffffff;
-        --text-color: #15141a;
-        --text-muted: #5b5b66;
-        --border-color: #e0e0e6;
-        --hover-bg: rgba(0, 0, 0, 0.05);
-        --accent-color: #37adff;
-        --accent-focus: #0060df;
-        --toggle-bg-off: #cfcfd8;
-        --link-color: #0060df;
+        --bg-color: #1c1b22;
+        --text-color: #fbfbfe;
+        --text-muted: #8f8f9d;
+        --border-color: #2b2a33;
+        --hover-bg: rgba(255, 255, 255, 0.08);
+        --accent-color: #0df;
+        --accent-focus: #66beff;
+        --toggle-bg-off: #4a4a55;
+        --link-color: #66beff;
       }
+    }
 
-      @media (prefers-color-scheme: dark) {
-        :root {
-          --bg-color: #1c1b22;
-          --text-color: #fbfbfe;
-          --text-muted: #8f8f9d;
-          --border-color: #2b2a33;
-          --hover-bg: rgba(255, 255, 255, 0.08);
-          --accent-color: #0df;
-          --accent-focus: #66beff;
-          --toggle-bg-off: #4a4a55;
-          --link-color: #66beff;
-        }
-      }
+    * {
+      box-sizing: border-box;
+    }
 
-      * {
-        box-sizing: border-box;
-      }
+    body {
+      margin: 0;
+      padding: 12px;
+      width: 260px;
+      background-color: var(--bg-color);
+      color: var(--text-color);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 13px;
+      user-select: none;
+    }
 
-      body {
-        margin: 0;
-        padding: 12px;
-        width: 260px;
-        background-color: var(--bg-color);
-        color: var(--text-color);
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-        font-size: 13px;
-        user-select: none;
-      }
+    /* Header section */
+    header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding-bottom: 8px;
+      margin-bottom: 10px;
+      border-bottom: 1px solid var(--border-color);
+    }
 
-      /* Header */
-      header {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding-bottom: 8px;
-        margin-bottom: 10px;
-        border-bottom: 1px solid var(--border-color);
-      }
+    header img {
+      width: 20px;
+      height: 20px;
+      flex-shrink: 0;
+    }
 
-      header img {
-        width: 20px;
-        height: 20px;
-        flex-shrink: 0;
-      }
+    header h1 {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: -0.2px;
+    }
 
-      header h1 {
-        margin: 0;
-        font-size: 14px;
-        font-weight: 600;
-        letter-spacing: -0.2px;
-      }
+    /* Active Container Status Banner */
+    .status-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background-color: var(--hover-bg);
+      border-radius: 6px;
+      padding: 6px 8px;
+      margin-bottom: 10px;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
 
-      /* Interactive Setting Rows */
-      .setting-row {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        gap: 12px;
-        padding: 8px;
-        border-radius: 6px;
-        cursor: pointer;
-        transition: background-color 0.15s ease;
-      }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: var(--accent-color);
+      flex-shrink: 0;
+    }
 
-      .setting-row:hover {
-        background-color: var(--hover-bg);
-      }
+    /* Setting Rows (Full clickable label target) */
+    .setting-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 8px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background-color 0.15s ease;
+    }
 
-      .setting-label {
-        font-size: 13px;
-        line-height: 1.3;
-        color: var(--text-color);
-        cursor: pointer;
-      }
+    .setting-row:hover {
+      background-color: var(--hover-bg);
+    }
 
-      /* Toggle Switch */
-      .toggle-switch {
-        position: relative;
-        display: inline-block;
-        width: 36px;
-        height: 20px;
-        flex-shrink: 0;
-      }
+    /* Disabled state (e.g. for unsupported Tab Groups API) */
+    .setting-row.disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+      pointer-events: none;
+    }
 
-      .toggle-switch input {
-        opacity: 0;
-        width: 0;
-        height: 0;
-        position: absolute;
-      }
+    .setting-label {
+      font-size: 13px;
+      line-height: 1.3;
+      color: var(--text-color);
+      cursor: pointer;
+    }
 
-      .slider {
-        position: absolute;
-        inset: 0;
-        border-radius: 20px;
-        background-color: var(--toggle-bg-off);
-        transition: background-color 0.2s ease, transform 0.1s ease;
-      }
+    /* Toggle Switch */
+    .toggle-switch {
+      position: relative;
+      display: inline-block;
+      width: 36px;
+      height: 20px;
+      flex-shrink: 0;
+    }
 
-      .slider:before {
-        content: "";
-        position: absolute;
-        height: 14px;
-        width: 14px;
-        left: 3px;
-        bottom: 3px;
-        border-radius: 50%;
-        background-color: #ffffff;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
-        transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-      }
+    .toggle-switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+      position: absolute;
+    }
 
-      input:checked + .slider {
-        background-color: var(--accent-color);
-      }
+    .slider {
+      position: absolute;
+      inset: 0;
+      border-radius: 20px;
+      background-color: var(--toggle-bg-off);
+      transition: background-color 0.2s ease, transform 0.1s ease;
+    }
 
-      input:checked + .slider:before {
-        transform: translateX(16px);
-      }
+    .slider:before {
+      content: "";
+      position: absolute;
+      height: 14px;
+      width: 14px;
+      left: 3px;
+      bottom: 3px;
+      border-radius: 50%;
+      background-color: #ffffff;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+      transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
 
-      input:focus-visible + .slider {
-        outline: 2px solid var(--accent-focus);
-        outline-offset: 2px;
-      }
+    input:checked+.slider {
+      background-color: var(--accent-color);
+    }
 
-      /* Footer links */
-      .link-container {
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        gap: 12px;
-        margin-top: 14px;
-        padding-top: 8px;
-        border-top: 1px solid var(--border-color);
-        font-size: 11px;
-      }
+    input:checked+.slider:before {
+      transform: translateX(16px);
+    }
 
-      .link-container a {
-        color: var(--link-color);
-        text-decoration: none;
-      }
+    input:focus-visible+.slider {
+      outline: 2px solid var(--accent-focus);
+      outline-offset: 2px;
+    }
 
-      .link-container a:hover {
-        text-decoration: underline;
-      }
+    /* Footer links */
+    .link-container {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 12px;
+      margin-top: 14px;
+      padding-top: 8px;
+      border-top: 1px solid var(--border-color);
+      font-size: 11px;
+    }
 
-      .divider {
-        color: var(--text-muted);
-        opacity: 0.5;
-      }
-    </style>
-  </head>
-  <body>
-    <header role="banner">
-      <img src="../icons/icon.svg" alt="" aria-hidden="true" />
-      <h1>Persistent Containers</h1>
-    </header>
+    .link-container a {
+      color: var(--link-color);
+      text-decoration: none;
+    }
 
-    <label class="setting-row" for="openNextToCurrent">
-      <span class="setting-label">Open next to current tab</span>
-      <span class="toggle-switch">
-        <input
-          type="checkbox"
-          id="openNextToCurrent"
-          checked
-          role="switch"
-        />
-        <span class="slider" aria-hidden="true"></span>
-      </span>
-    </label>
+    .link-container a:hover {
+      text-decoration: underline;
+    }
 
-    <label class="setting-row" for="inheritTabGroup">
-      <span class="setting-label">Open in current tab group</span>
-      <span class="toggle-switch">
-        <input
-          type="checkbox"
-          id="inheritTabGroup"
-          checked
-          role="switch"
-        />
-        <span class="slider" aria-hidden="true"></span>
-      </span>
-    </label>
+    .divider {
+      color: var(--text-muted);
+      opacity: 0.5;
+    }
+  </style>
+</head>
 
-    <footer class="link-container" aria-label="Extension links">
-      <a
-        href="https://github.com/navchandar/persistent-containers"
-        aria-label="View the source code on GitHub"
-        target="_blank"
-        rel="noopener noreferrer"
-        >Source</a
-      >
-      <span class="divider" aria-hidden="true">|</span>
-      <a
-        href="https://navchandar.github.io/persistent-containers/"
-        aria-label="Visit our help and support documentation"
-        target="_blank"
-        rel="noopener noreferrer"
-        >Help</a
-      >
-    </footer>
+<body>
+  <!-- Popup Header -->
+  <header role="banner">
+    <img src="../icons/icon.svg" alt="" aria-hidden="true" />
+    <h1>Persistent Containers</h1>
+  </header>
 
-    <script src="popup.js"></script>
-  </body>
+  <!-- Setting 1: Open Tab Next to Current -->
+  <label class="setting-row" for="openNextToCurrent">
+    <span class="setting-label">Open next to current tab</span>
+    <span class="toggle-switch">
+      <input type="checkbox" id="openNextToCurrent" role="switch" checked />
+      <span class="slider" aria-hidden="true"></span>
+    </span>
+  </label>
+
+  <!-- Setting 2: Inherit Tab Group -->
+  <label class="setting-row" for="inheritTabGroup">
+    <span class="setting-label">Open in current tab group</span>
+    <span class="toggle-switch">
+      <input type="checkbox" id="inheritTabGroup" role="switch" checked />
+      <span class="slider" aria-hidden="true"></span>
+    </span>
+  </label>
+
+  <!-- Footer Links -->
+  <footer class="link-container" aria-label="Extension links">
+    <a href="https://github.com/navchandar/persistent-containers" target="_blank" rel="noopener noreferrer"
+      aria-label="View the source code on GitHub">Source</a>
+    <span class="divider" aria-hidden="true">|</span>
+    <a href="https://navchandar.github.io/persistent-containers/" target="_blank" rel="noopener noreferrer"
+      aria-label="Visit our help and support documentation">Help</a>
+  </footer>
+
+  <script src="popup.js"></script>
+</body>
+
 </html>

@@ -1,41 +1,65 @@
 "use strict";
 
+/**
+ * =============================================================================
+ * Persistent Containers - Background Service Script
+ * =============================================================================
+ * 
+ * Core Responsibilities:
+ * 1. Active Container Inheritance:
+ *    Ensures newly opened tabs (via Ctrl+T, links, or bookmarks) open in the
+ *    same Firefox Multi-Account Container as the active tab.
+ * 2. Multi-Account Containers (MAC) Coordination:
+ *    Queries MAC for domain assignments so explicit user rules are not overridden.
+ * 3. Tab Grouping Inheritance:
+ *    Preserves tab grouping for newly spawned tabs (Firefox 138+).
+ * 4. Asynchronous State & Grace Recovery:
+ *    Persists active tab lineage to storage.session to safely recover after
+ *    background worker unloads or browser restarts.
+ */
+
 console.info("Persistent Containers: Background script initialized.");
 
 // -----------------------------------------------------------------------------
-// Configuration
+// Configuration & Constants
 // -----------------------------------------------------------------------------
 
 const DEFAULT_CONTAINER = "firefox-default";
 const MAC_EXTENSION_ID = "@testpilot-containers";
 const STATE_KEY = "persistentContainersRuntimeStateV3";
 
-const STARTUP_GRACE_MS = 3000;
-const BLANK_SETTLE_MS = 300;
-const BLANK_WAIT_LIMIT_MS = 10000;
-const MAC_TIMEOUT_MS = 1500;
-const MAX_DESTINATION_ATTEMPTS = 3;
-const MAX_REDIRECTS = 512;
+// Timing parameters (in milliseconds)
+const STARTUP_GRACE_MS = 3000;         // Grace window after launch to prevent tab thrashing
+const BLANK_SETTLE_MS = 300;           // Settle time for intentional about:blank tabs
+const BLANK_WAIT_LIMIT_MS = 10000;     // Max wait time for a new tab's destination URL to populate
+const MAC_TIMEOUT_MS = 1500;           // Response timeout when querying Multi-Account Containers
+const MAX_DESTINATION_ATTEMPTS = 3;    // Maximum retries if destination URL keeps changing
+const MAX_REDIRECTS = 512;             // Bound for replacement ID redirection map
 
+// Default extension preferences
 const DEFAULT_SETTINGS = {
     openNextToCurrent: true,
     inheritTabGroup: true,
 };
 
 const settings = {
-    ...DEFAULT_SETTINGS
+    ...DEFAULT_SETTINGS,
 };
 const changedSettings = new Set();
 
+// Session storage reference (used to survive background page unloads)
 const addonSession = browser.storage?.session ?? null;
 
+// Tab activation tracking (Window ID -> { current, previous })
 const activeHistory = new Map();
 const savedHistory = new Map();
 const bootstrapActiveTabs = new Map();
 
+// Window tracking & versioning
 const touchedWindows = new Set();
 const windowVersions = new Map();
 
+// Active processing queues & tab lifecycle tracking
 const pendingTabs = new Map();
 const ownedTabIds = new Set();
 const creationOperations = new Set();
@@ -50,6 +74,15 @@ let persistenceRunning = false;
 
 const LOG_PREFIX = "Persistent Containers";
 
+// -----------------------------------------------------------------------------
+// Diagnostics & Error Reporting
+// -----------------------------------------------------------------------------
+
+/**
+ * Normalizes an unknown error into a structured object for diagnostics.
+ * @param {unknown} error - Caught error or exception.
+ * @returns {{ name: string, message: string, stack?: string }}
+ */
 function describeError(error) {
     if (error instanceof Error) {
         return {
@@ -75,6 +108,14 @@ function describeError(error) {
     };
 }
 
+/**
+ * Formats and outputs structured errors to the Browser Console.
+ * @param {string} code - Diagnostic error code.
+ * @param {string} message - Human-readable explanation.
+ * @param {unknown} error - The caught error instance.
+ * @param {object} [context={}] - Contextual state (e.g. tabId, windowId).
+ * @param {string} [recovery=""] - Suggested troubleshooting or recovery step.
+ */
 function reportError(code, message, error, context = {}, recovery = "") {
     console.error(
         `[${LOG_PREFIX}] ${code}: ${message}`, {
@@ -85,14 +126,20 @@ function reportError(code, message, error, context = {}, recovery = "") {
     );
 }
 
+/**
+ * Formats and outputs non-fatal diagnostic warnings.
+ * @param {string} code - Diagnostic warning code.
+ * @param {string} message - Warning message.
+ * @param {object} [context={}] - Relevant contextual information.
+ */
 function reportWarning(code, message, context = {}) {
     console.warn(
         `[${LOG_PREFIX}] ${code}: ${message}`,
         context,
     );
 }
-// These catch otherwise-unhandled runtime failures.
-// They cannot catch a syntax error that prevents this file from loading.
+
+// Global runtime failure listeners
 globalThis.addEventListener("error", (event) => {
     reportError(
         "BACKGROUND_UNCAUGHT",
@@ -105,6 +152,7 @@ globalThis.addEventListener("error", (event) => {
         "Copy the first error and stack trace from the Browser Console.",
     );
 });
+
 globalThis.addEventListener("unhandledrejection", (event) => {
     reportError(
         "BACKGROUND_UNHANDLED_PROMISE",
@@ -114,23 +162,34 @@ globalThis.addEventListener("unhandledrejection", (event) => {
     );
 });
 
-
 // -----------------------------------------------------------------------------
-// Basic helpers
+// Basic Helpers & Inspection
 // -----------------------------------------------------------------------------
 
+/**
+ * Checks whether a value is a valid non-negative integer tab ID.
+ */
 function isTabId(value) {
     return Number.isInteger(value) && value >= 0;
 }
 
+/**
+ * Checks if a URL represents an empty or uninitialized page.
+ */
 function isBlankUrl(url) {
     return !url || url === "about:blank";
 }
 
+/**
+ * Checks if a URL is the default browser New Tab page.
+ */
 function isNewTabUrl(url) {
     return url === "about:newtab";
 }
 
+/**
+ * Checks whether a tab belongs to a Private Browsing context.
+ */
 function isPrivateTab(tab) {
     return Boolean(
         tab.incognito ||
@@ -138,6 +197,9 @@ function isPrivateTab(tab) {
     );
 }
 
+/**
+ * Checks whether a URL is a browser internal, extension, or privileged page.
+ */
 function isSystemUrl(url) {
     if (!url) {
         return false;
@@ -154,6 +216,10 @@ function isSystemUrl(url) {
     );
 }
 
+/**
+ * Determines whether a URL can be safely navigated to within a replacement tab.
+ * Avoids recreating file:, data:, blob:, or privileged internal schemes.
+ */
 function canRecreateUrl(url) {
     if (isBlankUrl(url) || isNewTabUrl(url)) {
         return true;
@@ -173,6 +239,9 @@ function canRecreateUrl(url) {
     }
 }
 
+/**
+ * Checks whether a tab participates in Firefox Split View.
+ */
 function hasSplitView(tab) {
     return (
         Number.isInteger(tab.splitViewId) &&
@@ -180,15 +249,21 @@ function hasSplitView(tab) {
     );
 }
 
+/**
+ * Evaluates whether an error indicates a tab was closed during processing.
+ */
 function isMissingTabError(error) {
     const message = describeError(error).message;
-    // Known missing-tab message patterns. These are intentionally narrow.
     return (
         /invalid tab id/i.test(message) ||
         /no tab with id/i.test(message) ||
         /tab .* does not exist/i.test(message)
     );
 }
+
+/**
+ * Safely fetches a tab by ID, returning null if closed or invalid.
+ */
 async function getTab(tabId) {
     if (!isTabId(tabId)) {
         return null;
@@ -197,21 +272,23 @@ async function getTab(tabId) {
         return await browser.tabs.get(tabId);
     } catch (error) {
         if (isMissingTabError(error)) {
-            // Expected when the user closes a tab during processing.
             return null;
         }
         reportError(
             "TAB_LOOKUP_FAILED",
             "Firefox could not retrieve a tab.",
             error, {
-                tabId
+                tabId,
             },
             "Check extension permissions and the preceding Browser Console errors.",
         );
-        // Do not misinterpret an unexpected API failure as a missing tab.
         throw error;
     }
 }
+
+/**
+ * Closes a temporary tab without logging benign 'missing tab' errors.
+ */
 async function removeTabQuietly(tabId) {
     if (!isTabId(tabId)) {
         return;
@@ -226,15 +303,16 @@ async function removeTabQuietly(tabId) {
             "TAB_CLEANUP_FAILED",
             "Could not remove a temporary replacement tab.",
             error, {
-                tabId
+                tabId,
             },
             "The original and replacement may both remain open. Check them before closing either.",
         );
     }
 }
 
-
-
+/**
+ * Wraps a promise with a maximum timeout, returning a fallback value if exceeded.
+ */
 async function withTimeout(promise, milliseconds, fallback) {
     let timer;
 
@@ -252,6 +330,9 @@ async function withTimeout(promise, milliseconds, fallback) {
     }
 }
 
+/**
+ * Increments the window version counter to invalidate outdated in-flight syncs.
+ */
 function touchWindow(windowId) {
     if (initializing) {
         touchedWindows.add(windowId);
@@ -263,6 +344,9 @@ function touchWindow(windowId) {
     );
 }
 
+/**
+ * Resolves a tab ID through any replacement redirects.
+ */
 function followReplacement(tabId) {
     const visited = new Set();
 
@@ -278,9 +362,13 @@ function followReplacement(tabId) {
 }
 
 // -----------------------------------------------------------------------------
-// Session-state persistence
+// Session-State Persistence
 // -----------------------------------------------------------------------------
 
+/**
+ * Persists active tab history to session storage so container lineage is preserved
+ * across background script suspensions.
+ */
 function persistState() {
     if (!addonSession) {
         return;
@@ -304,8 +392,6 @@ function persistState() {
             }
         })
         .catch((error) => {
-            // Do not create a tight retry loop after a storage failure.
-            // A subsequent event can request a fresh write.
             persistenceRequested = false;
             reportError(
                 "SESSION_SAVE_FAILED",
@@ -324,7 +410,9 @@ function persistState() {
         });
 }
 
-
+/**
+ * Records the currently active tab and previous tab for a given window.
+ */
 function rememberActiveTab(windowId, tabId, previousTabId) {
     if (!isTabId(tabId)) {
         return;
@@ -364,6 +452,9 @@ function rememberActiveTab(windowId, tabId, previousTabId) {
     persistState();
 }
 
+/**
+ * Purges closed tabs from history tracking structures.
+ */
 function forgetTabFromHistory(tabId, windowId) {
     let changed = false;
 
@@ -398,6 +489,9 @@ function forgetTabFromHistory(tabId, windowId) {
     }
 }
 
+/**
+ * Registers an original tab ID -> replacement tab ID mapping.
+ */
 function rememberReplacement(originalId, replacementId, windowId) {
     replacementIds.set(originalId, replacementId);
 
@@ -428,6 +522,9 @@ function rememberReplacement(originalId, replacementId, windowId) {
     persistState();
 }
 
+/**
+ * Synchronizes active tab state after async operations verify current state.
+ */
 async function syncActiveTab(tabId, windowId) {
     const version = windowVersions.get(windowId) ?? 0;
     const tab = await getTab(tabId);
@@ -449,6 +546,9 @@ async function syncActiveTab(tabId, windowId) {
 // Initialization
 // -----------------------------------------------------------------------------
 
+/**
+ * Reads settings, restores runtime session state, and maps active windows/tabs.
+ */
 async function initialize() {
     const settingsPromise = browser.storage.local
         .get(DEFAULT_SETTINGS)
@@ -542,7 +642,7 @@ async function initialize() {
 
                 if (!touchedWindows.has(windowId)) {
                     activeHistory.set(windowId, {
-                        ...entry
+                        ...entry,
                     });
                 }
             }
@@ -582,8 +682,9 @@ async function initialize() {
 }
 
 // -----------------------------------------------------------------------------
-// Multi-Account Containers integration
+// Multi-Account Containers (MAC) Integration
 // -----------------------------------------------------------------------------
+
 function isMissingMessageReceiver(error) {
     const message = describeError(error).message;
     return (
@@ -592,6 +693,10 @@ function isMissingMessageReceiver(error) {
     );
 }
 
+/**
+ * Checks whether Firefox Multi-Account Containers assigns the given URL to an
+ * explicit container. If so, we do not override MAC's native handling.
+ */
 async function hasMACAssignment(url) {
     let parsed;
     try {
@@ -669,12 +774,13 @@ async function hasMACAssignment(url) {
     }
 }
 
-
-
 // -----------------------------------------------------------------------------
-// Tab grouping
+// Tab Grouping
 // -----------------------------------------------------------------------------
 
+/**
+ * Assigns or unassigns a tab group based on user preferences and source tab group.
+ */
 async function applyTabGrouping(
     targetTabId,
     sourceTabId,
@@ -734,14 +840,16 @@ async function applyTabGrouping(
             },
             "Container handling can continue, but the tab group may be unchanged.",
         );
-
     }
 }
 
 // -----------------------------------------------------------------------------
-// Exact tracking of extension-created tabs
+// Tracking Extension-Created Tabs
 // -----------------------------------------------------------------------------
 
+/**
+ * Creates a tab and marks it as extension-owned so it is not recursively processed.
+ */
 async function createOwnedTab(properties) {
     let resolveOperation;
 
@@ -752,8 +860,6 @@ async function createOwnedTab(properties) {
         }),
     };
 
-    // Register before tabs.create(), because onCreated can arrive before
-    // the returned promise resolves.
     creationOperations.add(operation);
 
     let createdId = null;
@@ -772,7 +878,7 @@ async function createOwnedTab(properties) {
 }
 
 // -----------------------------------------------------------------------------
-// Pending-tab records
+// Pending Tab Records & Signals
 // -----------------------------------------------------------------------------
 
 function candidateFor(tabId) {
@@ -841,9 +947,12 @@ function cancelRecord(record) {
 }
 
 // -----------------------------------------------------------------------------
-// Inheritance-source recovery
+// Inheritance Source Resolution
 // -----------------------------------------------------------------------------
 
+/**
+ * Discovers the tab that spawned or was active prior to the newly created tab.
+ */
 async function resolveSource(record) {
     const eventCandidates = [
         record.activationSource,
@@ -926,9 +1035,12 @@ async function resolveSource(record) {
 }
 
 // -----------------------------------------------------------------------------
-// Destination resolution
+// Destination URL Resolution
 // -----------------------------------------------------------------------------
 
+/**
+ * Awaits the target tab settling on its destination URL (e.g. bookmarks or new tab).
+ */
 async function waitForDestination(record) {
     const deadline = record.createdAt + BLANK_WAIT_LIMIT_MS;
 
@@ -989,6 +1101,9 @@ async function waitForDestination(record) {
     return null;
 }
 
+/**
+ * Validates that the original tab has not changed identity, window, or container.
+ */
 function originalStillMatches(record, live, expected) {
     return Boolean(
         !record.cancelled &&
@@ -1004,9 +1119,12 @@ function originalStillMatches(record, live, expected) {
 }
 
 // -----------------------------------------------------------------------------
-// Container replacement
+// Container Replacement Engine
 // -----------------------------------------------------------------------------
 
+/**
+ * Replaces the default-container tab with a newly spawned tab in the source container.
+ */
 async function replaceTab(record, expected, sourceTab) {
     let replacement = null;
     let removalStarted = false;
@@ -1029,7 +1147,7 @@ async function replaceTab(record, expected, sourceTab) {
         ) {
             return {
                 id: original?.id ?? null,
-                retry: false
+                retry: false,
             };
         }
 
@@ -1038,7 +1156,7 @@ async function replaceTab(record, expected, sourceTab) {
         if (!containerId || containerId === DEFAULT_CONTAINER) {
             return {
                 id: original.id,
-                retry: false
+                retry: false,
             };
         }
 
@@ -1053,7 +1171,7 @@ async function replaceTab(record, expected, sourceTab) {
 
             return {
                 id: original.id,
-                retry: false
+                retry: false,
             };
         }
 
@@ -1188,10 +1306,9 @@ async function replaceTab(record, expected, sourceTab) {
 
         return {
             id: replacement.id,
-            retry: false
+            retry: false,
         };
     } catch (error) {
-
         reportError(
             "TAB_REPLACEMENT_FAILED",
             "Could not complete container inheritance.",
@@ -1204,7 +1321,6 @@ async function replaceTab(record, expected, sourceTab) {
             },
             "The script will attempt cleanup. Check whether the original or replacement tab remains open.",
         );
-
 
         const remainingOriginal = await getTab(record.id);
 
@@ -1225,7 +1341,7 @@ async function replaceTab(record, expected, sourceTab) {
 
             return {
                 id: replacement.id,
-                retry: false
+                retry: false,
             };
         }
 
@@ -1241,9 +1357,12 @@ async function replaceTab(record, expected, sourceTab) {
 }
 
 // -----------------------------------------------------------------------------
-// Main created-tab processing
+// Main Created-Tab Processing Loop
 // -----------------------------------------------------------------------------
 
+/**
+ * Orchestrates evaluation, source deduction, URL resolution, and container replacement.
+ */
 async function processCreatedTab(record) {
     await ready;
 
@@ -1303,8 +1422,7 @@ async function processCreatedTab(record) {
             return destination?.id ?? null;
         }
 
-        // Never override a container already selected by Firefox or
-        // another extension.
+        // Never override a container already selected by Firefox or another extension
         if (
             destination.cookieStoreId !== DEFAULT_CONTAINER ||
             source.cookieStoreId === DEFAULT_CONTAINER
@@ -1318,9 +1436,8 @@ async function processCreatedTab(record) {
             return destination.id;
         }
 
+        // Let MAC enforce native assignment and exemption rules
         if (await hasMACAssignment(destination.url)) {
-            // Let MAC implement its assignment, confirmation, and exemption
-            // rules. Do not force a container and bypass that behavior.
             await applyTabGrouping(
                 destination.id,
                 followReplacement(source.id),
@@ -1361,10 +1478,11 @@ async function processCreatedTab(record) {
 }
 
 // -----------------------------------------------------------------------------
-// Event handlers
-// Register synchronously, before starting asynchronous initialization.
+// Synchronous Event Handlers
+// (Registered synchronously at load time before asynchronous initialization)
 // -----------------------------------------------------------------------------
 
+// Arm startup grace period on browser launch
 browser.runtime.onStartup.addListener(() => {
     startupGraceUntil = Date.now() + STARTUP_GRACE_MS;
     persistState();
@@ -1374,6 +1492,7 @@ browser.runtime.onStartup.addListener(() => {
     );
 });
 
+// Seed default settings on initial extension install
 browser.runtime.onInstalled.addListener((details) => {
     if (details.reason !== "install") {
         return;
@@ -1389,6 +1508,7 @@ browser.runtime.onInstalled.addListener((details) => {
         });
 });
 
+// React to live preference changes from popup.js
 browser.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") {
         return;
@@ -1408,8 +1528,8 @@ browser.storage.onChanged.addListener((changes, area) => {
     }
 });
 
+// Primary interception entry point for newly created tabs
 browser.tabs.onCreated.addListener((newTab) => {
-    // This extension intentionally does not containerize private tabs.
     if (isPrivateTab(newTab)) {
         return;
     }
@@ -1422,7 +1542,7 @@ browser.tabs.onCreated.addListener((newTab) => {
         id: newTab.id,
         windowId: newTab.windowId,
         initial: {
-            ...newTab
+            ...newTab,
         },
         createdAt: Date.now(),
         sequence: ++creationSequence,
@@ -1506,7 +1626,6 @@ browser.tabs.onUpdated.addListener((tabId) => {
     }
 });
 
-
 browser.tabs.onActivated.addListener((activeInfo) => {
     const {
         tabId,
@@ -1584,6 +1703,7 @@ browser.windows.onRemoved.addListener((windowId) => {
     persistState();
 });
 
+// Shortcut command to open a clean tab explicitly outside any container
 browser.commands.onCommand.addListener((command, commandTab) => {
     if (command !== "open-new-tab-without-container") {
         return;
@@ -1654,26 +1774,25 @@ browser.commands.onCommand.addListener((command, commandTab) => {
     };
 
     execute().catch((error) => {
-
         reportError(
             "NO_CONTAINER_COMMAND_FAILED",
             "The command could not finish opening a non-container tab.",
             error, {
-                command
+                command,
             },
             "Check the preceding error and whether a new tab was already created.",
         );
-
     });
 });
 
 // -----------------------------------------------------------------------------
-// Initialize after synchronous listener registration.
+// Launch Background Initialization
 // -----------------------------------------------------------------------------
 
 console.info(
     "[Persistent Containers] LISTENERS_READY: All event listeners registered.",
 );
+
 const ready = initialize()
     .then(() => {
         console.info(
@@ -1698,8 +1817,8 @@ const ready = initialize()
         initializing = false;
         touchedWindows.clear();
     });
-// Attach an explicit rejection handler so a failed initialization does not
-// create an additional unhandled rejection from this startup chain.
+
+// Unhandled rejection prevention on startup
 ready.then(
     () => {
         persistState();
