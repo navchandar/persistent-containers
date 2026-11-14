@@ -48,7 +48,7 @@ jobs:
       # Attach the .xpi directly to the GitHub Release page
       - name: Attach XPI to GitHub Release
         if: github.event_name == 'release'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: ./web-ext-artifacts/*.xpi
 
